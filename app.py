@@ -1,4 +1,5 @@
 import atexit
+import os
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory, make_response
@@ -280,4 +281,5 @@ def get_competitors(symbol):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=3001, use_reloader=False)
+    port = int(os.environ.get('PORT', 3001))
+    app.run(debug=False, port=port, use_reloader=False)
