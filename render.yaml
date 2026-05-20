@@ -2,5 +2,5 @@ services:
   - type: web
     name: stocktracker
     runtime: python
-    buildCommand: pip install flask flask-cors yfinance apscheduler requests werkzeug gunicorn
+    buildCommand: pip install flask flask-cors yfinance apscheduler requests werkzeug gunicorn curl_cffi
     startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
