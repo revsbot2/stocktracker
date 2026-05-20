@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="en" translate="no">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Tracker</title>
+  <script src="/static/react.development.js"></script>
+  <script src="/static/react-dom.development.js"></script>
+  <script src="/static/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --green:     #3fb950;
+      --red:       #f85149;
+      --blue:      #58a6ff;
+      --yellow:    #d29922;
+      --orange:    #f0883e;
+      --purple:    #bc8cff;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* Navbar */
+    .navbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .navbar-logo { font-size: 18px; font-weight: 700; color: var(--blue); letter-spacing: -0.5px; white-space: nowrap; }
+    .navbar-sep { flex: 1; }
+    .navbar-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex;
+      gap: 4px;
+      padding: 12px 24px 0;
+    }
+    .filter-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .filter-btn.active { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+
+    /* Buttons */
+    .btn {
+      border: none;
+      border-radius: 6px;
+      padding: 7px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .btn-danger { background: #2d1517; border: 1px solid var(--red); color: var(--red); }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    /* Main layout */
+    .main { padding: 16px 24px 40px; }
+
+    /* Stock grid */
+    .stock-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    /* Stock card */
+    .stock-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.1s;
+      position: relative;
+    }
+    .stock-card:hover { border-color: var(--blue); transform: translateY(-1px); }
+
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .card-symbol { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1; }
+    .card-name { font-size: 11px; color: var(--muted); margin-top: 3px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card-remove {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .card-remove:hover { color: var(--red); }
+
+    /* Type badge */
+    .type-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 12px;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+    .badge-EQUITY  { background: #1a2b3c; color: var(--blue); }
+    .badge-ETF     { background: #1d2b1d; color: var(--green); }
+    .badge-BOND    { background: #2a251a; color: var(--yellow); }
+    .badge-FUTURE  { background: #2a1d2d; color: var(--purple); }
+    .badge-default { background: #22272e; color: var(--muted); }
+
+    /* Price section */
+    .price-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .price-main { font-size: 24px; font-weight: 700; }
+    .change-pct { font-size: 13px; font-weight: 600; }
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+
+    /* Metrics grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .metric-item {}
+    .metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .metric-value { font-size: 13px; font-weight: 500; margin-top: 1px; }
+
+    /* Consensus badge */
+    .consensus-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .consensus-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+    }
+    .consensus-strong-buy { background: #1a3a1a; color: #4ade80; }
+    .consensus-buy        { background: #1a2e1a; color: var(--green); }
+    .consensus-hold       { background: #2a2510; color: var(--yellow); }
+    .consensus-underperform { background: #2a1c10; color: var(--orange); }
+    .consensus-sell       { background: #2d1517; color: var(--red); }
+    .consensus-na         { background: #22272e; color: var(--muted); }
+    .consensus-analysts   { font-size: 11px; color: var(--muted); }
+
+    /* Updated timestamp */
+    .card-footer { margin-top: 10px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 8px; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 80px 24px;
+      color: var(--muted);
+    }
+    .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+    .empty-state p { margin-bottom: 24px; }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 60px;
+      color: var(--muted);
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Modal overlay */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      padding: 16px;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 520px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .modal-title { font-size: 17px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none;
+      color: var(--muted); font-size: 20px;
+      cursor: pointer; line-height: 1;
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    /* Form */
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .form-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-input:focus { border-color: var(--blue); }
+    .form-hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+    .form-error { font-size: 12px; color: var(--red); margin-top: 8px; padding: 8px 12px; background: #2d1517; border-radius: 6px; }
+    .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+    /* Competitor list */
+    .competitor-list { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+    .competitor-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .competitor-item:hover { border-color: var(--blue); }
+    .competitor-item.selected { border-color: var(--blue); background: #111c2a; }
+    .competitor-item input[type="checkbox"] { accent-color: var(--blue); width: 16px; height: 16px; cursor: pointer; }
+    .competitor-sym { font-weight: 700; font-size: 14px; min-width: 60px; }
+    .competitor-name { font-size: 12px; color: var(--muted); flex: 1; }
+    .competitor-price { font-size: 13px; font-weight: 500; white-space: nowrap; }
+    .competitor-loading { text-align: center; padding: 24px; color: var(--muted); }
+
+    /* Detail modal */
+    .detail-section { margin-bottom: 20px; }
+    .detail-section-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .detail-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .detail-metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+    .detail-metric-value { font-size: 14px; font-weight: 600; margin-top: 2px; }
+    .description-text { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+    /* News */
+    .news-list { display: flex; flex-direction: column; gap: 10px; }
+    .news-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      transition: border-color 0.15s;
+    }
+    .news-item:hover { border-color: var(--blue); }
+    .news-item a { text-decoration: none; color: inherit; }
+    .news-title { font-size: 13px; font-weight: 500; line-height: 1.4; margin-bottom: 4px; color: var(--text); }
+    .news-meta { font-size: 11px; color: var(--muted); }
+    .news-title:hover { color: var(--blue); }
+
+    /* 52w range bar */
+    .range-bar-container { margin-top: 8px; }
+    .range-bar-track { height: 4px; background: var(--border); border-radius: 2px; position: relative; margin: 8px 0; }
+    .range-bar-fill { height: 100%; background: var(--blue); border-radius: 2px; }
+    .range-bar-dot { width: 10px; height: 10px; background: var(--blue); border-radius: 50%; position: absolute; top: -3px; transform: translateX(-50%); border: 2px solid var(--surface); }
+    .range-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+    /* Login screen */
+    .login-screen {
+      min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; background: var(--bg); padding: 24px;
+    }
+    .login-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 400px;
+    }
+    .login-logo { font-size: 22px; font-weight: 700; color: var(--blue); margin-bottom: 6px; }
+    .login-tagline { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+    .login-tabs { display: flex; gap: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 3px; margin-bottom: 24px; }
+    .login-tab { flex: 1; background: none; border: none; color: var(--muted); padding: 7px; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 6px; transition: all 0.15s; }
+    .login-tab:hover { color: var(--text); }
+    .login-tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+    .login-sent { background: #111c2a; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+    .login-sent strong { color: var(--blue); }
+    .code-input { font-size: 28px !important; font-weight: 700 !important; letter-spacing: 10px !important; text-align: center !important; font-family: monospace !important; }
+    .login-divider { text-align: center; color: var(--muted); font-size: 11px; margin: 12px 0; }
+    .set-password-hint { font-size: 12px; color: var(--muted); margin-top: 16px; padding: 10px; background: var(--bg); border-radius: 6px; text-align: center; }
+    .set-password-hint button { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 12px; }
+
+    /* Search dropdown */
+    .search-wrapper { position: relative; }
+    .search-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      z-index: 300;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .search-result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      transition: background 0.1s;
+      border-bottom: 1px solid var(--border);
+    }
+    .search-result:last-child { border-bottom: none; }
+    .search-result:hover, .search-result.focused { background: #1e2530; }
+    .search-result-sym { font-weight: 700; font-size: 14px; min-width: 70px; color: var(--blue); }
+    .search-result-name { font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-result-type { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .search-searching { padding: 12px 14px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+    /* Theme chips */
+    .theme-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
+    .theme-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #1e2a3a; border: 1px solid #2a4060;
+      color: #7db8f7; font-size: 10px; font-weight: 600;
+      padding: 2px 8px; border-radius: 12px; letter-spacing: 0.3px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .theme-chip:hover { background: #243350; border-color: var(--blue); }
+    .theme-chip-add {
+      background: none; border: 1px dashed #3a4a5a;
+      color: #6a8aaa; font-size: 11px;
+      padding: 3px 10px; border-radius: 12px;
+      cursor: pointer; transition: all 0.15s; font-weight: 500;
+    }
+    .theme-chip-add:hover { border-color: var(--blue); color: var(--blue); background: #111c2a; }
+
+    /* Theme filter bar */
+    .theme-filter-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 24px 0; align-items: center; }
+    .theme-filter-label { font-size: 11px; color: var(--muted); margin-right: 4px; }
+
+    /* Theme editor modal */
+    .theme-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .theme-input-row .form-input { flex: 1; }
+    .current-themes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; min-height: 28px; }
+    .theme-chip-removable {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: #1e2a3a; border: 1px solid #2a4060;
+      color: #7db8f7; font-size: 12px; font-weight: 600;
+      padding: 4px 10px; border-radius: 14px;
+    }
+    .theme-chip-removable button {
+      background: none; border: none; color: #7db8f7;
+      cursor: pointer; font-size: 14px; line-height: 1; padding: 0;
+      opacity: 0.7;
+    }
+    .theme-chip-removable button:hover { opacity: 1; color: var(--red); }
+    .suggestions-label { font-size: 11px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .suggestion-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .suggestion-chip {
+      background: #1a2228; border: 1px solid var(--border);
+      color: var(--muted); font-size: 11px;
+      padding: 3px 10px; border-radius: 12px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .suggestion-chip:hover { border-color: var(--blue); color: var(--blue); background: #1a2535; }
+    .suggestion-chip.used { opacity: 0.3; cursor: default; }
+
+    /* View toggle */
+    .view-toggle { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px; }
+    .view-btn {
+      background: none; border: none; color: var(--muted);
+      padding: 4px 10px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-weight: 500; transition: all 0.15s;
+    }
+    .view-btn:hover { color: var(--text); }
+    .view-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+
+    /* Table view */
+    .table-wrapper { overflow-x: auto; margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead { background: #0d1117; }
+    th {
+      padding: 10px 14px; text-align: left;
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap; cursor: pointer; user-select: none;
+    }
+    th:hover { color: var(--text); }
+    th .sort-arrow { margin-left: 4px; opacity: 0.5; }
+    th.sorted { color: var(--blue); }
+    th.sorted .sort-arrow { opacity: 1; }
+    th.num, td.num { text-align: right; }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1a2030; }
+    td { padding: 10px 14px; white-space: nowrap; }
+    td.sym { font-weight: 700; font-size: 14px; }
+    td.name-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+    td.remove-cell { width: 36px; padding: 0 8px; }
+    .row-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px 6px; border-radius: 4px; transition: color 0.15s; }
+    .row-remove:hover { color: var(--red); }
+
+    /* Refresh indicator */
+    .refreshing-bar {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--blue), transparent);
+      animation: shimmer 1.2s infinite;
+    }
+    @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+    .refreshing-wrapper { overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="preload" style="min-height:100vh;background:#0d1117;color:#8b949e;display:flex;align-items:center;justify-content:center;font-family:sans-serif;font-size:14px;">Starting up…</div>
+  <div id="st-app" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"></div>
+
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById("st-app").innerHTML =
+        '<div style="min-height:100vh;background:#0d1117;color:#f85149;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:13px;padding:24px;white-space:pre-wrap">'
+        + 'JS ERROR:\n' + msg + '\n\nFile: ' + src + ':' + line
+        + '</div>';
+    };
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ─── LoginScreen ─────────────────────────────────────────────────────────
+    function LoginScreen({ onLogin }) {
+      const [tab, setTab]             = useState('login');  // 'login' | 'register'
+      const [email, setEmail]         = useState('');
+      const [password, setPassword]   = useState('');
+      const [loading, setLoading]     = useState(false);
+      const [error, setError]         = useState('');
+      const emailRef = useRef(null);
+
+      useEffect(() => { emailRef.current && emailRef.current.focus(); }, [tab]);
+
+      const submit = async () => {
+        setLoading(true); setError('');
+        const endpoint = tab === 'login' ? '/api/auth/login' : '/api/auth/register';
+        const res = await fetch(endpoint, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const json = await res.json();
+        if (!res.ok) { setError(json.error || 'Something went wrong'); setLoading(false); }
+        else onLogin(json.user);
+      };
+
+      const handleKey = (e) => { if (e.key === 'Enter' && email && password) submit(); };
+
+      return (
+        <div className="login-screen">
+          <div className="login-card">
+            <div className="login-logo">StockTracker</div>
+            <div className="login-tagline">Track your portfolio in one place</div>
+
+            <div className="login-tabs">
+              <button className={`login-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => { setTab('login'); setError(''); }}>Sign In</button>
+              <button className={`login-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => { setTab('register'); setError(''); }}>Create Account</button>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Email</label>
+              <input ref={emailRef} className="form-input" type="email"
+                placeholder="you@email.com" value={email}
+                onChange={e => setEmail(e.target.value)} onKeyDown={handleKey} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password"
+                placeholder={tab === 'register' ? 'Min 6 characters' : '••••••••'}
+                value={password} onChange={e => setPassword(e.target.value)} onKeyDown={handleKey} />
+            </div>
+
+            {error && <div className="form-error">{error}</div>}
+
+            <button className="btn btn-primary" style={{width:'100%', padding:'10px', marginTop:4}}
+              onClick={submit} disabled={loading || !email.trim() || !password}>
+              {loading ? (tab === 'login' ? 'Signing in…' : 'Creating account…') : (tab === 'login' ? 'Sign In' : 'Create Account')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+        // ─── Formatters ─────────────────────────────────────────────────────────
+    const fmt = {
+      price(v, currency = 'USD') {
+        if (v == null) return 'N/A';
+        const sym = { USD: '$', EUR: '€', GBP: '£', JPY: '¥' }[currency] || (currency + ' ');
+        return sym + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      },
+      cap(v) {
+        if (v == null) return 'N/A';
+        if (v >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+        if (v >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
+        if (v >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
+        return `$${v.toLocaleString()}`;
+      },
+      pct(v) {
+        if (v == null) return 'N/A';
+        return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+      },
+      num(v, decimals = 2) {
+        if (v == null) return 'N/A';
+        return typeof v === 'number' ? v.toFixed(decimals) : String(v);
+      },
+      time(ts) {
+        if (!ts) return '';
+        const d = new Date(ts * 1000);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      },
+      updated(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' });
+      },
+      vol(v) {
+        if (v == null) return 'N/A';
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+        return String(v);
+      },
+    };
+
+    // ─── ConsensusBadge ──────────────────────────────────────────────────────
+    function ConsensusBadge({ consensus }) {
+      if (!consensus) return <span className="consensus-badge consensus-na">N/A</span>;
+      const key = consensus.toLowerCase().replace(' ', '-');
+      const cls = {
+        'strong-buy': 'consensus-strong-buy',
+        'buy':        'consensus-buy',
+        'hold':       'consensus-hold',
+        'underperform': 'consensus-underperform',
+        'sell':       'consensus-sell',
+      }[key] || 'consensus-na';
+      return <span className={`consensus-badge ${cls}`}>{consensus}</span>;
+    }
+
+    // ─── TypeBadge ───────────────────────────────────────────────────────────
+    function TypeBadge({ type }) {
+      const cls = ['EQUITY','ETF','BOND','FUTURE'].includes(type) ? `badge-${type}` : 'badge-default';
+      return <span className={`type-badge ${cls}`}>{type || 'EQUITY'}</span>;
+    }
+
+    // ─── StockCard ───────────────────────────────────────────────────────────
+    function StockCard({ stock, onRemove, onClick, onEditThemes }) {
+      const pos = stock.change_pct >= 0;
+      return (
+        <div className="stock-card" onClick={() => onClick(stock)}>
+          <div className="card-header">
+            <div>
+              <div className="card-symbol">{stock.symbol}</div>
+              <div className="card-name" title={stock.name}>{stock.name}</div>
+              <TypeBadge type={stock.asset_type} />
+            </div>
+            <button className="card-remove" title="Remove"
+              onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
+          </div>
+          <div className="theme-chips" onClick={e => e.stopPropagation()}>
+            {(stock.themes || []).map(t => (
+              <span key={t} className="theme-chip" onClick={() => onEditThemes(stock)}>{t}</span>
+            ))}
+            <span className="theme-chip-add" onClick={() => onEditThemes(stock)}>+ theme</span>
+          </div>
+
+          <div className="price-row">
+            <span className="price-main">{fmt.price(stock.price, stock.currency)}</span>
+            {stock.change_pct != null && (
+              <span className={`change-pct ${pos ? 'positive' : 'negative'}`}>
+                {fmt.pct(stock.change_pct)}
+              </span>
+            )}
+          </div>
+
+          <div className="metrics-grid">
+            <div className="metric-item">
+              <div className="metric-label">Market Cap</div>
+              <div className="metric-value">{fmt.cap(stock.market_cap)}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">P/E Ratio</div>
+              <div className="metric-value">{fmt.num(stock.pe_ratio)}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">PEG Ratio</div>
+              <div className="metric-value">{fmt.num(stock.peg_ratio)}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Target Price</div>
+              <div className="metric-value">{fmt.price(stock.target_price, stock.currency)}</div>
+            </div>
+          </div>
+
+          <div className="consensus-row">
+            <ConsensusBadge consensus={stock.analyst_consensus} />
+            {stock.num_analysts && (
+              <span className="consensus-analysts">{stock.num_analysts} analysts</span>
+            )}
+          </div>
+
+          {stock.last_updated && (
+            <div className="card-footer">Updated {fmt.updated(stock.last_updated)}</div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── DetailModal ─────────────────────────────────────────────────────────
+    function DetailModal({ stock, onClose, onThemeSave }) {
+      if (!stock) return null;
+      const pos = stock.change_pct >= 0;
+
+      // Inline theme editor state
+      const [themes, setThemes] = useState([...(stock.themes || [])]);
+      const [themeInput, setThemeInput] = useState('');
+      const [themeSaving, setThemeSaving] = useState(false);
+      const [themeSaved, setThemeSaved] = useState(false);
+
+      const addTheme = (tag) => {
+        const t = tag.trim();
+        if (t && !themes.includes(t)) setThemes(prev => [...prev, t]);
+        setThemeInput('');
+        setThemeSaved(false);
+      };
+      const removeTheme = (tag) => { setThemes(prev => prev.filter(t => t !== tag)); setThemeSaved(false); };
+      const handleThemeKey = (e) => {
+        if ((e.key === 'Enter' || e.key === ',') && themeInput.trim()) { e.preventDefault(); addTheme(themeInput); }
+      };
+      const saveThemes = async () => {
+        setThemeSaving(true);
+        await fetch(`/api/watchlist/${stock.symbol}`, {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ themes }),
+        });
+        setThemeSaving(false);
+        setThemeSaved(true);
+        onThemeSave && onThemeSave(stock.symbol, themes);
+      };
+
+      const suggestions = getSuggestions(stock).filter(s => !themes.includes(s));
+
+      const low52  = stock.fifty_two_week_low;
+      const high52 = stock.fifty_two_week_high;
+      const price  = stock.price;
+      const rangePos = (low52 != null && high52 != null && high52 > low52 && price != null)
+        ? Math.min(100, Math.max(0, ((price - low52) / (high52 - low52)) * 100))
+        : null;
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" style={{maxWidth: 640}} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="modal-title">{stock.symbol}</span>
+                <span style={{color: 'var(--muted)', fontWeight: 400, marginLeft: 8, fontSize: 14}}>{stock.name}</span>
+              </div>
+              <button className="modal-close" onClick={onClose}>×</button>
+            </div>
+
+            {/* Price */}
+            <div style={{display:'flex', alignItems:'baseline', gap:10, marginBottom:20}}>
+              <span style={{fontSize:28, fontWeight:700}}>{fmt.price(stock.price, stock.currency)}</span>
+              {stock.change_pct != null && (
+                <span className={pos ? 'positive' : 'negative'} style={{fontSize:15, fontWeight:600}}>
+                  {fmt.pct(stock.change_pct)} today
+                </span>
+              )}
+              <TypeBadge type={stock.asset_type} />
+            </div>
+
+            {/* Key metrics */}
+            <div className="detail-section">
+              <div className="detail-section-title">Key Metrics</div>
+              <div className="detail-metrics">
+                {[
+                  ['P/E Ratio',    fmt.num(stock.pe_ratio)],
+                  ['PEG Ratio',    fmt.num(stock.peg_ratio)],
+                  ['Market Cap',   fmt.cap(stock.market_cap)],
+                  ['Target Price', fmt.price(stock.target_price, stock.currency)],
+                  ['Target High',  fmt.price(stock.target_high, stock.currency)],
+                  ['Target Low',   fmt.price(stock.target_low, stock.currency)],
+                  ['EPS (TTM)',    fmt.num(stock.eps)],
+                  ['Fwd EPS',      fmt.num(stock.forward_eps)],
+                  ['Beta',         fmt.num(stock.beta)],
+                  ['Volume',       fmt.vol(stock.volume)],
+                  ['Avg Volume',   fmt.vol(stock.avg_volume)],
+                  ['Dividend Yld', stock.dividend_yield != null ? (stock.dividend_yield * 100).toFixed(2) + '%' : 'N/A'],
+                ].map(([label, val]) => (
+                  <div key={label}>
+                    <div className="detail-metric-label">{label}</div>
+                    <div className="detail-metric-value">{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Analyst consensus */}
+            <div className="detail-section">
+              <div className="detail-section-title">Analyst Consensus</div>
+              <div style={{display:'flex', alignItems:'center', gap:10}}>
+                <ConsensusBadge consensus={stock.analyst_consensus} />
+                {stock.num_analysts && <span style={{color:'var(--muted)', fontSize:12}}>{stock.num_analysts} analysts</span>}
+              </div>
+            </div>
+
+            {/* Themes */}
+            <div className="detail-section">
+              <div className="detail-section-title">Themes</div>
+              <div className="current-themes" style={{marginBottom:8}}>
+                {themes.length === 0 && <span style={{color:'var(--muted)', fontSize:12}}>No themes yet</span>}
+                {themes.map(t => (
+                  <span key={t} className="theme-chip-removable">
+                    {t}
+                    <button onClick={() => removeTheme(t)}>×</button>
+                  </span>
+                ))}
+              </div>
+              <div style={{display:'flex', gap:8, marginBottom: suggestions.length > 0 ? 10 : 0}}>
+                <input
+                  className="form-input"
+                  style={{fontSize:13, padding:'6px 10px'}}
+                  placeholder="Add a theme, press Enter…"
+                  value={themeInput}
+                  onChange={e => { setThemeInput(e.target.value); setThemeSaved(false); }}
+                  onKeyDown={handleThemeKey}
+                  onClick={e => e.stopPropagation()}
+                />
+                <button className="btn btn-secondary btn-sm" onClick={() => addTheme(themeInput)} disabled={!themeInput.trim()}>Add</button>
+                <button className="btn btn-primary btn-sm" onClick={saveThemes} disabled={themeSaving}>
+                  {themeSaving ? 'Saving…' : themeSaved ? 'Saved ✓' : 'Save'}
+                </button>
+              </div>
+              {suggestions.length > 0 && (
+                <div>
+                  <div className="suggestions-label">Suggested</div>
+                  <div className="suggestion-chips">
+                    {suggestions.map(s => (
+                      <span key={s} className="suggestion-chip" onClick={() => addTheme(s)}>+ {s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 52-week range */}
+            {rangePos !== null && (
+              <div className="detail-section">
+                <div className="detail-section-title">52-Week Range</div>
+                <div className="range-bar-container">
+                  <div className="range-bar-track">
+                    <div className="range-bar-fill" style={{width: `${rangePos}%`}} />
+                    <div className="range-bar-dot" style={{left: `${rangePos}%`}} />
+                  </div>
+                  <div className="range-labels">
+                    <span>{fmt.price(low52, stock.currency)}</span>
+                    <span>{fmt.price(high52, stock.currency)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Company info */}
+            {(stock.sector || stock.industry || stock.country) && (
+              <div className="detail-section">
+                <div className="detail-section-title">Company</div>
+                <div style={{display:'flex', gap:24, flexWrap:'wrap', marginBottom:10}}>
+                  {stock.sector   && <div><div className="detail-metric-label">Sector</div><div className="detail-metric-value">{stock.sector}</div></div>}
+                  {stock.industry && <div><div className="detail-metric-label">Industry</div><div className="detail-metric-value">{stock.industry}</div></div>}
+                  {stock.country  && <div><div className="detail-metric-label">Country</div><div className="detail-metric-value">{stock.country}</div></div>}
+                  {stock.employees && <div><div className="detail-metric-label">Employees</div><div className="detail-metric-value">{stock.employees.toLocaleString()}</div></div>}
+                </div>
+                {stock.description && <p className="description-text">{stock.description}{stock.description.length >= 600 ? '…' : ''}</p>}
+                {stock.website && (
+                  <a href={stock.website} target="_blank" rel="noopener noreferrer"
+                     style={{color:'var(--blue)', fontSize:12, marginTop:6, display:'inline-block'}}
+                     onClick={e => e.stopPropagation()}>
+                    {stock.website}
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* News */}
+            {stock.news && stock.news.length > 0 && (
+              <div className="detail-section">
+                <div className="detail-section-title">Latest News</div>
+                <div className="news-list">
+                  {stock.news.map((item, i) => (
+                    <div key={i} className="news-item">
+                      <a href={item.link} target="_blank" rel="noopener noreferrer"
+                         onClick={e => e.stopPropagation()}>
+                        <div className="news-title">{item.title}</div>
+                        <div className="news-meta">
+                          {item.publisher}{item.published ? ` · ${fmt.time(item.published)}` : ''}
+                        </div>
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── AddModal ────────────────────────────────────────────────────────────
+    function AddModal({ onClose, onAdded }) {
+      const [query, setQuery] = useState('');
+      const [results, setResults] = useState([]);
+      const [searching, setSearching] = useState(false);
+      const [focusedIdx, setFocusedIdx] = useState(-1);
+      const [selectedSymbol, setSelectedSymbol] = useState('');
+      const [selectedName, setSelectedName] = useState('');
+      const [showDropdown, setShowDropdown] = useState(false);
+      const [adding, setAdding] = useState(false);
+      const [error, setError] = useState('');
+      const inputRef = useRef(null);
+      const debounceRef = useRef(null);
+
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+      const doSearch = (val) => {
+        clearTimeout(debounceRef.current);
+        setSelectedSymbol('');
+        setSelectedName('');
+        setError('');
+        if (val.trim().length < 2) { setResults([]); setShowDropdown(false); return; }
+        debounceRef.current = setTimeout(async () => {
+          setSearching(true);
+          setShowDropdown(true);
+          try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(val.trim())}`, { credentials: 'include' });
+            const data = await res.json();
+            setResults(data);
+            setFocusedIdx(-1);
+          } catch {}
+          setSearching(false);
+        }, 300);
+      };
+
+      const handleInput = (e) => {
+        const val = e.target.value;
+        setQuery(val);
+        doSearch(val);
+      };
+
+      const pickResult = (r) => {
+        setSelectedSymbol(r.symbol);
+        setSelectedName(r.name);
+        setQuery(`${r.symbol} — ${r.name}`);
+        setShowDropdown(false);
+        setResults([]);
+      };
+
+      const handleKeyDown = (e) => {
+        if (!showDropdown || results.length === 0) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIdx(i => Math.min(i + 1, results.length - 1)); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)); }
+        else if (e.key === 'Enter' && focusedIdx >= 0) { e.preventDefault(); pickResult(results[focusedIdx]); }
+        else if (e.key === 'Escape') { setShowDropdown(false); }
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        // Use selected symbol from dropdown, or treat raw query as a ticker
+        const sym = (selectedSymbol || query.trim()).toUpperCase().split(' ')[0].replace(/[^A-Z0-9.=^-]/g, '');
+        if (!sym) return;
+        setAdding(true);
+        setError('');
+        try {
+          const res = await fetch('/api/watchlist', { credentials: 'include',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: sym }),
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            setError(json.error || 'Something went wrong');
+          } else {
+            onAdded(json.data);
+          }
+        } catch {
+          setError('Network error — is the server running?');
+        } finally {
+          setAdding(false);
+        }
+      };
+
+      const canSubmit = query.trim().length > 0 && !adding;
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Add to Watchlist</span>
+              <button className="modal-close" onClick={onClose}>×</button>
+            </div>
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label className="form-label">Search by company name or ticker</label>
+                <div className="search-wrapper">
+                  <input
+                    ref={inputRef}
+                    className="form-input"
+                    placeholder="e.g. Apple, Tesla, AAPL, SPY, BTC-USD, ES=F"
+                    value={query}
+                    onChange={handleInput}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                    onFocus={() => results.length > 0 && setShowDropdown(true)}
+                    autoComplete="off"
+                  />
+                  {showDropdown && (
+                    <div className="search-dropdown">
+                      {searching ? (
+                        <div className="search-searching">
+                          <div className="spinner" style={{width:14,height:14,borderWidth:2,margin:0,flexShrink:0}} />
+                          Searching…
+                        </div>
+                      ) : results.length === 0 ? (
+                        <div className="search-searching">No matches found</div>
+                      ) : (
+                        results.map((r, i) => (
+                          <div key={r.symbol}
+                            className={`search-result ${i === focusedIdx ? 'focused' : ''}`}
+                            onMouseDown={() => pickResult(r)}>
+                            <span className="search-result-sym">{r.symbol}</span>
+                            <span className="search-result-name">{r.name}</span>
+                            <span className="search-result-type">{r.type}{r.exchange ? ` · ${r.exchange}` : ''}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                {selectedSymbol && (
+                  <div style={{fontSize:12, color:'var(--green)', marginTop:6}}>
+                    Selected: <strong>{selectedSymbol}</strong> — {selectedName}
+                  </div>
+                )}
+                <div className="form-hint" style={{marginTop:6}}>
+                  Type a company name to search, or enter a ticker directly (SPY, BTC-USD, ES=F, ^TNX)
+                </div>
+              </div>
+              {error && <div className="form-error">{error}</div>}
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+                  {adding ? 'Fetching…' : 'Add'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Theme suggestion map ────────────────────────────────────────────────
+    const INDUSTRY_THEMES = {
+      'Software—Infrastructure':               ['Cloud', 'SaaS', 'Cybersecurity'],
+      'Software—Application':                  ['SaaS', 'Enterprise Software'],
+      'Software - Infrastructure':             ['Cloud', 'SaaS', 'Cybersecurity'],
+      'Software - Application':                ['SaaS', 'Enterprise Software'],
+      'Semiconductors':                        ['Semiconductors', 'AI Hardware', 'Chips'],
+      'Semiconductor Equipment & Materials':   ['Semiconductors', 'Chips'],
+      'Internet Content & Information':        ['Internet', 'Digital Media', 'Ad Tech'],
+      'Computer Hardware':                     ['Hardware', 'Technology'],
+      'Communication Equipment':               ['Networking', 'Telecom'],
+      'Electronic Components':                 ['Electronics', 'IoT'],
+      'Information Technology Services':       ['IT Services', 'Consulting'],
+      'Health Information Services':           ['HealthTech', 'Digital Health'],
+      'Medical Devices':                       ['MedTech', 'Healthcare'],
+      'Drug Manufacturers—General':            ['Big Pharma', 'Healthcare'],
+      'Drug Manufacturers—Specialty & Generic':['Pharma', 'Healthcare'],
+      'Biotechnology':                         ['Biotech', 'Life Sciences'],
+      'Diagnostics & Research':                ['Diagnostics', 'Life Sciences'],
+      'Banks—Diversified':                     ['Banking', 'Finance'],
+      'Banks—Regional':                        ['Regional Banking', 'Finance'],
+      'Financial Data & Stock Exchanges':      ['Fintech', 'Finance'],
+      'Asset Management':                      ['Asset Management', 'Finance'],
+      'Insurance—Diversified':                 ['Insurance', 'Finance'],
+      'Credit Services':                       ['Credit', 'Fintech'],
+      'Capital Markets':                       ['Finance', 'Capital Markets'],
+      'Oil & Gas Integrated':                  ['Oil & Gas', 'Energy'],
+      'Oil & Gas E&P':                         ['Oil & Gas', 'Energy'],
+      'Oil & Gas Midstream':                   ['Oil & Gas', 'Energy'],
+      'Solar':                                 ['Solar', 'Clean Energy'],
+      'Utilities—Renewable':                   ['Renewable Energy', 'Clean Energy'],
+      'Auto Manufacturers':                    ['Automotive', 'EV'],
+      'Auto Parts':                            ['Automotive', 'EV Supply Chain'],
+      'Internet Retail':                       ['E-commerce', 'Retail'],
+      'Specialty Retail':                      ['Retail', 'Consumer'],
+      'Discount Stores':                       ['Retail', 'Consumer Staples'],
+      'Aerospace & Defense':                   ['Defense', 'Aerospace'],
+      'Airlines':                              ['Airlines', 'Transportation'],
+      'Restaurants':                           ['Food & Beverage', 'Consumer'],
+      'Beverages—Non-Alcoholic':               ['Beverages', 'Consumer Staples'],
+      'Packaged Foods':                        ['Food', 'Consumer Staples'],
+      'Telecom Services':                      ['Telecom', 'Communication'],
+      'Entertainment':                         ['Entertainment', 'Media'],
+      'Electronic Gaming & Multimedia':        ['Gaming', 'Entertainment'],
+      'Gold':                                  ['Gold', 'Commodities'],
+      'Silver':                                ['Silver', 'Commodities'],
+    };
+
+    const SECTOR_THEMES = {
+      'Technology':             ['Technology'],
+      'Healthcare':             ['Healthcare'],
+      'Financial Services':     ['Finance'],
+      'Consumer Cyclical':      ['Consumer'],
+      'Consumer Defensive':     ['Consumer Staples'],
+      'Energy':                 ['Energy'],
+      'Utilities':              ['Utilities'],
+      'Real Estate':            ['Real Estate'],
+      'Basic Materials':        ['Materials'],
+      'Industrials':            ['Industrials'],
+      'Communication Services': ['Communication'],
+    };
+
+    function getSuggestions(stock) {
+      const byIndustry = INDUSTRY_THEMES[stock.industry] || [];
+      const bySector   = SECTOR_THEMES[stock.sector] || [];
+      const all = [...new Set([...byIndustry, ...bySector])];
+      return all;
+    }
+
+    // ─── ThemeModal ──────────────────────────────────────────────────────────
+    function ThemeModal({ stock, onClose, onSave }) {
+      const [themes, setThemes] = useState([...(stock.themes || [])]);
+      const [input, setInput] = useState('');
+      const inputRef = useRef(null);
+
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+      const add = (tag) => {
+        const t = tag.trim();
+        if (t && !themes.includes(t)) setThemes(prev => [...prev, t]);
+        setInput('');
+      };
+
+      const remove = (tag) => setThemes(prev => prev.filter(t => t !== tag));
+
+      const handleKey = (e) => {
+        if ((e.key === 'Enter' || e.key === ',') && input.trim()) {
+          e.preventDefault();
+          add(input);
+        }
+      };
+
+      const suggestions = getSuggestions(stock).filter(s => !themes.includes(s));
+
+      const handleSave = async () => {
+        await fetch(`/api/watchlist/${stock.symbol}`, {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ themes }),
+        });
+        onSave(stock.symbol, themes);
+        onClose();
+      };
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" style={{maxWidth:480}} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="modal-title">Themes</span>
+                <span style={{color:'var(--muted)', fontWeight:400, marginLeft:8, fontSize:13}}>{stock.symbol} — {stock.name}</span>
+              </div>
+              <button className="modal-close" onClick={onClose}>×</button>
+            </div>
+
+            <div style={{marginBottom:12}}>
+              <div className="form-label" style={{marginBottom:8}}>Current themes</div>
+              <div className="current-themes">
+                {themes.length === 0 && <span style={{color:'var(--muted)', fontSize:13}}>No themes yet</span>}
+                {themes.map(t => (
+                  <span key={t} className="theme-chip-removable">
+                    {t}
+                    <button onClick={() => remove(t)}>×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="theme-input-row">
+              <input
+                ref={inputRef}
+                className="form-input"
+                placeholder="Type a theme and press Enter…"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+              />
+              <button className="btn btn-secondary" onClick={() => add(input)} disabled={!input.trim()}>Add</button>
+            </div>
+
+            {suggestions.length > 0 && (
+              <div style={{marginTop:16}}>
+                <div className="suggestions-label">Suggested for {stock.industry || stock.sector || stock.symbol}</div>
+                <div className="suggestion-chips">
+                  {suggestions.map(s => (
+                    <span key={s} className={`suggestion-chip ${themes.includes(s) ? 'used' : ''}`}
+                      onClick={() => !themes.includes(s) && add(s)}>
+                      + {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="form-actions" style={{marginTop:20}}>
+              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSave}>Save</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── TableView ───────────────────────────────────────────────────────────
+    const COLUMNS = [
+      { key: 'symbol',           label: 'Symbol',     num: false },
+      { key: 'name',             label: 'Name',       num: false },
+      { key: 'asset_type',       label: 'Type',       num: false },
+      { key: 'price',            label: 'Price',      num: true  },
+      { key: 'change_pct',       label: 'Change %',   num: true  },
+      { key: 'market_cap',       label: 'Mkt Cap',    num: true  },
+      { key: 'pe_ratio',         label: 'P/E',        num: true  },
+      { key: 'peg_ratio',        label: 'PEG',        num: true  },
+      { key: 'target_price',     label: 'Target',     num: true  },
+      { key: 'analyst_consensus',label: 'Consensus',  num: false },
+      { key: 'themes',           label: 'Themes',     num: false },
+      { key: 'volume',           label: 'Volume',     num: true  },
+      { key: 'fifty_two_week_high', label: '52W High',num: true  },
+      { key: 'fifty_two_week_low',  label: '52W Low', num: true  },
+    ];
+
+    function TableView({ stocks, onRemove, onRowClick, onEditThemes }) {
+      const [sortKey, setSortKey] = useState('symbol');
+      const [sortDir, setSortDir] = useState(1); // 1 = asc, -1 = desc
+
+      const handleSort = (key) => {
+        if (sortKey === key) setSortDir(d => -d);
+        else { setSortKey(key); setSortDir(1); }
+      };
+
+      const sorted = [...stocks].sort((a, b) => {
+        let av = a[sortKey], bv = b[sortKey];
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === 'string') return sortDir * av.localeCompare(bv);
+        return sortDir * (av - bv);
+      });
+
+      const renderCell = (stock, col) => {
+        const v = stock[col.key];
+        switch (col.key) {
+          case 'symbol':      return <td key={col.key} className="sym">{v}</td>;
+          case 'name':        return <td key={col.key} className="name-cell" title={v}>{v}</td>;
+          case 'asset_type':  return <td key={col.key}><TypeBadge type={v} /></td>;
+          case 'price':       return <td key={col.key} className="num">{fmt.price(v, stock.currency)}</td>;
+          case 'change_pct':  return (
+            <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>
+              {v != null ? fmt.pct(v) : 'N/A'}
+            </td>
+          );
+          case 'market_cap':  return <td key={col.key} className="num">{fmt.cap(v)}</td>;
+          case 'pe_ratio':    return <td key={col.key} className="num">{fmt.num(v)}</td>;
+          case 'peg_ratio':   return <td key={col.key} className="num">{fmt.num(v)}</td>;
+          case 'target_price':return <td key={col.key} className="num">{fmt.price(v, stock.currency)}</td>;
+          case 'analyst_consensus': return <td key={col.key}><ConsensusBadge consensus={v} /></td>;
+          case 'themes': return (
+            <td key={col.key}>
+              <div style={{display:'flex', flexWrap:'wrap', gap:3, minWidth:80}}>
+                {(stock.themes || []).map(t => (
+                  <span key={t} className="theme-chip" style={{fontSize:10, padding:'1px 6px'}}
+                    onClick={e => { e.stopPropagation(); onEditThemes(stock); }}>{t}</span>
+                ))}
+                <span className="theme-chip-add" style={{fontSize:10, padding:'1px 6px'}}
+                  onClick={e => { e.stopPropagation(); onEditThemes(stock); }}>+ theme</span>
+              </div>
+            </td>
+          );
+          case 'volume':      return <td key={col.key} className="num">{fmt.vol(v)}</td>;
+          case 'fifty_two_week_high': return <td key={col.key} className="num">{fmt.price(v, stock.currency)}</td>;
+          case 'fifty_two_week_low':  return <td key={col.key} className="num">{fmt.price(v, stock.currency)}</td>;
+          default:            return <td key={col.key}>{v != null ? String(v) : 'N/A'}</td>;
+        }
+      };
+
+      return (
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                {COLUMNS.map(col => (
+                  <th key={col.key} className={`${col.num ? 'num' : ''} ${sortKey === col.key ? 'sorted' : ''}`}
+                      onClick={() => handleSort(col.key)}>
+                    {col.label}
+                    <span className="sort-arrow">
+                      {sortKey === col.key ? (sortDir === 1 ? '↑' : '↓') : '↕'}
+                    </span>
+                  </th>
+                ))}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(stock => (
+                <tr key={stock.symbol} onClick={() => onRowClick(stock)}>
+                  {COLUMNS.map(col => renderCell(stock, col))}
+                  <td className="remove-cell">
+                    <button className="row-remove" title="Remove"
+                      onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // ─── CompetitorModal ─────────────────────────────────────────────────────
+    function CompetitorModal({ symbol, onClose, onAddSelected }) {
+      const [competitors, setCompetitors] = useState([]);
+      const [selected, setSelected] = useState(new Set());
+      const [loading, setLoading] = useState(true);
+      const [adding, setAdding] = useState(false);
+
+      useEffect(() => {
+        fetch(`/api/competitors/${symbol}`, { credentials: 'include' })
+          .then(r => r.json())
+          .then(data => { setCompetitors(data); setLoading(false); })
+          .catch(() => setLoading(false));
+      }, [symbol]);
+
+      const toggle = (sym) => {
+        setSelected(prev => {
+          const next = new Set(prev);
+          next.has(sym) ? next.delete(sym) : next.add(sym);
+          return next;
+        });
+      };
+
+      const handleAdd = async () => {
+        if (!selected.size) { onClose(); return; }
+        setAdding(true);
+        const added = [];
+        for (const sym of selected) {
+          try {
+            const res = await fetch('/api/watchlist', { credentials: 'include',
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ symbol: sym }),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              added.push(json.data);
+            }
+          } catch {}
+        }
+        setAdding(false);
+        onAddSelected(added);
+      };
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Add Competitors / Peers</span>
+              <button className="modal-close" onClick={onClose}>×</button>
+            </div>
+            <p style={{color:'var(--muted)', fontSize:13, marginBottom:4}}>
+              Yahoo Finance suggests these similar companies for <strong style={{color:'var(--text)'}}>{symbol}</strong>.
+              Select any you'd like to track:
+            </p>
+
+            {loading ? (
+              <div className="competitor-loading">
+                <div className="spinner" style={{width:24,height:24,marginBottom:8}} />
+                Loading peers…
+              </div>
+            ) : competitors.length === 0 ? (
+              <div className="competitor-loading" style={{color:'var(--muted)'}}>
+                No peer suggestions found for {symbol}.
+              </div>
+            ) : (
+              <div className="competitor-list">
+                {competitors.map(c => (
+                  <div key={c.symbol}
+                    className={`competitor-item ${selected.has(c.symbol) ? 'selected' : ''}`}
+                    onClick={() => toggle(c.symbol)}>
+                    <input type="checkbox" checked={selected.has(c.symbol)} onChange={() => toggle(c.symbol)} onClick={e => e.stopPropagation()} />
+                    <span className="competitor-sym">{c.symbol}</span>
+                    <span className="competitor-name">{c.name}</span>
+                    <span className="competitor-price">{c.price ? fmt.price(c.price, c.currency) : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="form-actions" style={{marginTop:16}}>
+              <button className="btn btn-secondary" onClick={onClose}>Skip</button>
+              <button className="btn btn-primary" disabled={adding || selected.size === 0} onClick={handleAdd}>
+                {adding ? 'Adding…' : `Add ${selected.size > 0 ? selected.size + ' Stock' + (selected.size > 1 ? 's' : '') : 'Selected'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── App ─────────────────────────────────────────────────────────────────
+    function App() {
+      const [user, setUser]                 = useState(null);
+      const [authChecked, setAuthChecked]   = useState(false);
+      const [watchlist, setWatchlist]       = useState([]);
+      const [loading, setLoading]           = useState(true);
+      const [refreshing, setRefreshing]     = useState(false);
+      const [showAdd, setShowAdd]           = useState(false);
+      const [detailStock, setDetailStock]   = useState(null);
+      const [competitorFor, setCompetitorFor] = useState(null);
+      const [filter, setFilter]             = useState('ALL');
+      const [lastRefresh, setLastRefresh]   = useState(null);
+      const [view, setView]                 = useState('cards'); // 'cards' | 'table'
+      const [themeStock, setThemeStock]     = useState(null);
+      const [activeTheme, setActiveTheme]   = useState(null);
+      const [showSetPw, setShowSetPw]       = useState(false);
+      const [newPw, setNewPw]               = useState('');
+      const [pwMsg, setPwMsg]               = useState('');
+
+      // Check auth on mount
+      useEffect(() => {
+        fetch('/api/auth/me', { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null)
+          .then(u => { setUser(u); setAuthChecked(true); })
+          .catch(() => setAuthChecked(true));
+      }, []);
+
+      // Watchlist fetch — defined before early returns to satisfy Rules of Hooks
+      const fetchWatchlist = useCallback(async (quiet = false) => {
+        if (!quiet) setLoading(true);
+        try {
+          const res = await fetch('/api/watchlist', { credentials: 'include' });
+          const data = await res.json();
+          setWatchlist(data);
+          setLastRefresh(new Date());
+        } catch {}
+        setLoading(false);
+      }, []);
+
+      // Initial load + poll every 5 min; only runs when user is logged in
+      useEffect(() => {
+        if (!user) return;
+        fetchWatchlist();
+        const id = setInterval(() => fetchWatchlist(true), 5 * 60 * 1000);
+        return () => clearInterval(id);
+      }, [user, fetchWatchlist]);
+
+      if (!authChecked) return <div style={{minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', color:'#58a6ff', fontSize:16}}>Checking login…</div>;
+      if (!user) return <LoginScreen onLogin={u => setUser(u)} />;
+
+      const handleLogout = async () => {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        setUser(null);
+        setWatchlist([]);
+      };
+
+      const handleSetPassword = async () => {
+        if (newPw.length < 6) { setPwMsg('Must be at least 6 characters'); return; }
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: newPw }),
+        });
+        if (res.ok) { setPwMsg('Password saved!'); setNewPw(''); setTimeout(() => { setShowSetPw(false); setPwMsg(''); }, 1500); }
+        else { const j = await res.json(); setPwMsg(j.error || 'Error'); }
+      };
+
+      const handleRefreshAll = async () => {
+        setRefreshing(true);
+        await fetch('/api/refresh', { method: 'POST', credentials: 'include' });
+        await fetchWatchlist(true);
+        setRefreshing(false);
+      };
+
+      const handleAdded = (newData) => {
+        setShowAdd(false);
+        fetchWatchlist(true);
+        // Offer competitor suggestions only for equities
+        if (newData && newData.asset_type === 'EQUITY') {
+          setCompetitorFor(newData.symbol);
+        }
+      };
+
+      const handleCompetitorsAdded = (newItems) => {
+        setCompetitorFor(null);
+        if (newItems.length > 0) fetchWatchlist(true);
+      };
+
+      const handleRemove = async (symbol) => {
+        await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE', credentials: 'include' });
+        setWatchlist(prev => prev.filter(s => s.symbol !== symbol));
+      };
+
+      const handleThemeSave = (symbol, themes) => {
+        setWatchlist(prev => prev.map(s => s.symbol === symbol ? { ...s, themes } : s));
+      };
+
+      const allThemes = [...new Set(watchlist.flatMap(s => s.themes || []))].sort();
+
+      const filtered = watchlist
+        .filter(s => filter === 'ALL' || (s.asset_type || 'EQUITY') === filter)
+        .filter(s => !activeTheme || (s.themes || []).includes(activeTheme));
+
+      const types = ['ALL', ...new Set(watchlist.map(s => s.asset_type || 'EQUITY'))];
+
+      return (
+        <>
+          {/* Navbar */}
+          <nav className="navbar">
+            <div className="navbar-logo">StockTracker</div>
+            <div className="navbar-sep" />
+            {lastRefresh && (
+              <div className="navbar-meta">Last updated {fmt.updated(lastRefresh.toISOString())}</div>
+            )}
+            <div className="view-toggle">
+              <button className={`view-btn ${view === 'cards' ? 'active' : ''}`} onClick={() => setView('cards')} title="Card view">
+                ⊞ Cards
+              </button>
+              <button className={`view-btn ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')} title="Table view">
+                ≡ Table
+              </button>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={handleRefreshAll} disabled={refreshing}>
+              {refreshing ? 'Refreshing…' : 'Refresh All'}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>
+            <div style={{borderLeft:'1px solid var(--border)', paddingLeft:12, display:'flex', alignItems:'center', gap:8}}>
+              <span style={{fontSize:12, color:'var(--muted)', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={user.email}>{user.email}</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setShowSetPw(s => !s); setPwMsg(''); }}>Password</button>
+              <button className="btn btn-secondary btn-sm" onClick={handleLogout}>Sign out</button>
+            </div>
+          </nav>
+
+          {/* Refresh shimmer */}
+          {refreshing && <div className="refreshing-wrapper"><div className="refreshing-bar" /></div>}
+
+          {/* Set password panel */}
+          {showSetPw && (
+            <div style={{background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'12px 24px', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
+              <span style={{fontSize:13, color:'var(--muted)', marginRight:4}}>
+                {user && !pwMsg ? 'Set a password for quick sign-in:' : ''}
+              </span>
+              <input className="form-input" type="password" placeholder="New password (min 6 chars)"
+                style={{maxWidth:240, padding:'6px 10px', fontSize:13}}
+                value={newPw} onChange={e => setNewPw(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSetPassword()} />
+              <button className="btn btn-primary btn-sm" onClick={handleSetPassword} disabled={!newPw}>Save</button>
+              {pwMsg && <span style={{fontSize:12, color: pwMsg.includes('!') ? 'var(--green)' : 'var(--red)'}}>{pwMsg}</span>}
+            </div>
+          )}
+
+          {/* Type filter bar */}
+          {watchlist.length > 0 && (
+            <div className="filter-bar">
+              {types.map(t => (
+                <button key={t} className={`filter-btn ${filter === t ? 'active' : ''}`} onClick={() => setFilter(t)}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Theme filter bar */}
+          {allThemes.length > 0 && (
+            <div className="theme-filter-bar">
+              <span className="theme-filter-label">Theme:</span>
+              <span
+                className={`theme-chip ${!activeTheme ? 'active' : ''}`}
+                style={!activeTheme ? {background:'#1a3050', borderColor:'var(--blue)'} : {}}
+                onClick={() => setActiveTheme(null)}>
+                All
+              </span>
+              {allThemes.map(t => (
+                <span key={t}
+                  className="theme-chip"
+                  style={activeTheme === t ? {background:'#1a3050', borderColor:'var(--blue)'} : {}}
+                  onClick={() => setActiveTheme(prev => prev === t ? null : t)}>
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Main */}
+          <main className="main">
+            {loading ? (
+              <div className="loading">
+                <div className="spinner" />
+                Loading your watchlist…
+              </div>
+            ) : filtered.length === 0 && watchlist.length === 0 ? (
+              <div className="empty-state">
+                <h2>Your watchlist is empty</h2>
+                <p>Add stocks, ETFs, futures, or bonds to get started.</p>
+                <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add your first asset</button>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="empty-state">
+                <h2>No {filter} assets tracked</h2>
+                <p>Try a different filter or add one.</p>
+              </div>
+            ) : view === 'table' ? (
+              <TableView
+                stocks={filtered}
+                onRemove={handleRemove}
+                onRowClick={setDetailStock}
+                onEditThemes={setThemeStock}
+              />
+            ) : (
+              <div className="stock-grid">
+                {filtered.map(s => (
+                  <StockCard
+                    key={s.symbol}
+                    stock={s}
+                    onRemove={handleRemove}
+                    onClick={setDetailStock}
+                    onEditThemes={setThemeStock}
+                  />
+                ))}
+              </div>
+            )}
+          </main>
+
+          {/* Modals */}
+          {showAdd && <AddModal onClose={() => setShowAdd(false)} onAdded={handleAdded} />}
+
+          {competitorFor && (
+            <CompetitorModal
+              symbol={competitorFor}
+              onClose={() => setCompetitorFor(null)}
+              onAddSelected={handleCompetitorsAdded}
+            />
+          )}
+
+          {detailStock && (
+            <DetailModal
+              stock={detailStock}
+              onClose={() => setDetailStock(null)}
+              onThemeSave={handleThemeSave}
+            />
+          )}
+
+          {themeStock && (
+            <ThemeModal
+              stock={themeStock}
+              onClose={() => setThemeStock(null)}
+              onSave={handleThemeSave}
+            />
+          )}
+        </>
+      );
+    }
+
+    const preload = document.getElementById('preload');
+    if (preload) preload.style.display = 'none';
+    ReactDOM.render(<App />, document.getElementById("st-app"));
+  </script>
+</body>
+</html>

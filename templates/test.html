@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8" /><title>Test</title></head>
+<body style="background:white;color:black;font-size:24px;padding:40px">
+  <p id="s1" style="color:green">✓ HTML loaded</p>
+  <p id="s2" style="color:gray">JS not yet run</p>
+  <p id="s3" style="color:gray">React not yet loaded</p>
+  <div id="app"></div>
+  <script>document.getElementById('s2').textContent = '✓ Plain JS works';</script>
+  <script src="/static/react.development.js" onload="document.getElementById('s3').textContent='✓ React loaded'"></script>
+  <script src="/static/react-dom.development.js"></script>
+  <script src="/static/babel.min.js"></script>
+  <script type="text/babel">
+    document.getElementById('app').innerHTML = '<p style="color:blue">✓ Babel + React rendered!</p>';
+  </script>
+</body>
+</html>
