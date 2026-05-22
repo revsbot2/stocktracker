@@ -1375,9 +1375,10 @@
       { key: 'fifty_two_week_low',  label: '52W Low', num: true  },
     ];
 
-    function TableView({ stocks, onRemove, onRowClick, onEditThemes }) {
+    function TableView({ stocks, onRemove, onRowClick, onEditThemes, onBulkTheme }) {
       const [sortKey, setSortKey] = useState('symbol');
-      const [sortDir, setSortDir] = useState(1); // 1 = asc, -1 = desc
+      const [sortDir, setSortDir] = useState(1);
+      const [selectedRows, setSelectedRows] = useState(new Set());
 
       const handleSort = (key) => {
         if (sortKey === key) setSortDir(d => -d);
@@ -1391,6 +1392,22 @@
         if (typeof av === 'string') return sortDir * av.localeCompare(bv);
         return sortDir * (av - bv);
       });
+
+      const toggleRow = (symbol, e) => {
+        e.stopPropagation();
+        setSelectedRows(prev => {
+          const next = new Set(prev);
+          next.has(symbol) ? next.delete(symbol) : next.add(symbol);
+          return next;
+        });
+      };
+
+      const allSelected = sorted.length > 0 && sorted.every(s => selectedRows.has(s.symbol));
+      const toggleAll = (e) => {
+        e.stopPropagation();
+        if (allSelected) setSelectedRows(new Set());
+        else setSelectedRows(new Set(sorted.map(s => s.symbol)));
+      };
 
       const renderCell = (stock, col) => {
         const v = stock[col.key];
@@ -1429,35 +1446,54 @@
       };
 
       return (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                {COLUMNS.map(col => (
-                  <th key={col.key} className={`${col.num ? 'num' : ''} ${sortKey === col.key ? 'sorted' : ''}`}
-                      onClick={() => handleSort(col.key)}>
-                    {col.label}
-                    <span className="sort-arrow">
-                      {sortKey === col.key ? (sortDir === 1 ? '↑' : '↓') : '↕'}
-                    </span>
+        <>
+          {selectedRows.size > 0 && (
+            <div style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:'8px 16px', margin:'12px 0 4px', display:'flex', alignItems:'center', gap:12}}>
+              <span style={{fontSize:13, color:'var(--text)', fontWeight:600}}>{selectedRows.size} selected</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => onBulkTheme([...selectedRows])}>Set Theme</button>
+              <button className="btn btn-secondary btn-sm" style={{marginLeft:'auto'}} onClick={() => setSelectedRows(new Set())}>Clear</button>
+            </div>
+          )}
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{width:40, padding:'10px 8px 10px 14px', cursor:'default'}} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" style={{accentColor:'var(--blue)', cursor:'pointer'}}
+                      checked={allSelected} onChange={toggleAll} />
                   </th>
-                ))}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(stock => (
-                <tr key={stock.symbol} onClick={() => onRowClick(stock)}>
-                  {COLUMNS.map(col => renderCell(stock, col))}
-                  <td className="remove-cell">
-                    <button className="row-remove" title="Remove"
-                      onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
-                  </td>
+                  {COLUMNS.map(col => (
+                    <th key={col.key} className={`${col.num ? 'num' : ''} ${sortKey === col.key ? 'sorted' : ''}`}
+                        onClick={() => handleSort(col.key)}>
+                      {col.label}
+                      <span className="sort-arrow">
+                        {sortKey === col.key ? (sortDir === 1 ? '↑' : '↓') : '↕'}
+                      </span>
+                    </th>
+                  ))}
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {sorted.map(stock => (
+                  <tr key={stock.symbol} onClick={() => onRowClick(stock)}
+                    style={selectedRows.has(stock.symbol) ? {background:'#111c2a'} : {}}>
+                    <td style={{padding:'10px 8px 10px 14px'}} onClick={e => toggleRow(stock.symbol, e)}>
+                      <input type="checkbox" style={{accentColor:'var(--blue)', cursor:'pointer'}}
+                        checked={selectedRows.has(stock.symbol)}
+                        onChange={e => toggleRow(stock.symbol, e)} />
+                    </td>
+                    {COLUMNS.map(col => renderCell(stock, col))}
+                    <td className="remove-cell">
+                      <button className="row-remove" title="Remove"
+                        onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       );
     }
 
@@ -1527,6 +1563,24 @@
               </div>
             ) : (
               <div className="competitor-list">
+                <div style={{display:'flex', alignItems:'center', gap:12, padding:'6px 14px 10px', borderBottom:'1px solid var(--border)', marginBottom:4}}>
+                  <input type="checkbox"
+                    style={{accentColor:'var(--blue)', width:16, height:16, cursor:'pointer'}}
+                    checked={selected.size === competitors.length && competitors.length > 0}
+                    onChange={() => {
+                      if (selected.size === competitors.length) setSelected(new Set());
+                      else setSelected(new Set(competitors.map(c => c.symbol)));
+                    }}
+                  />
+                  <span style={{fontSize:12, color:'var(--muted)', cursor:'pointer', userSelect:'none'}}
+                    onClick={() => {
+                      if (selected.size === competitors.length) setSelected(new Set());
+                      else setSelected(new Set(competitors.map(c => c.symbol)));
+                    }}>
+                    {selected.size === competitors.length ? 'Deselect all' : 'Select all'}
+                  </span>
+                  {selected.size > 0 && <span style={{fontSize:12, color:'var(--blue)', marginLeft:4}}>{selected.size} selected</span>}
+                </div>
                 {competitors.map(c => (
                   <div key={c.symbol}
                     className={`competitor-item ${selected.has(c.symbol) ? 'selected' : ''}`}
@@ -1545,6 +1599,106 @@
               <button className="btn btn-primary" disabled={adding || selected.size === 0} onClick={handleAdd}>
                 {adding ? 'Adding…' : `Add ${selected.size > 0 ? selected.size + ' Stock' + (selected.size > 1 ? 's' : '') : 'Selected'}`}
               </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── BulkThemeModal ──────────────────────────────────────────────────────
+    function BulkThemeModal({ symbols, watchlist, onClose, onSave }) {
+      const [themes, setThemes] = useState([]);
+      const [input, setInput] = useState('');
+      const inputRef = useRef(null);
+
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+      const add = (tag) => {
+        const t = tag.trim();
+        if (t && !themes.includes(t)) setThemes(prev => [...prev, t]);
+        setInput('');
+      };
+      const remove = (tag) => setThemes(prev => prev.filter(t => t !== tag));
+      const handleKey = (e) => {
+        if ((e.key === 'Enter' || e.key === ',') && input.trim()) { e.preventDefault(); add(input); }
+      };
+
+      const handleSave = async () => {
+        for (const sym of symbols) {
+          const existing = (watchlist.find(s => s.symbol === sym) || {}).themes || [];
+          const merged = [...new Set([...existing, ...themes])];
+          await fetch(`/api/watchlist/${sym}`, {
+            method: 'PATCH', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ themes: merged }),
+          });
+        }
+        onSave(symbols, themes);
+        onClose();
+      };
+
+      const selectedStocks = watchlist.filter(s => symbols.includes(s.symbol));
+      const suggestions = [...new Set(selectedStocks.flatMap(s => getSuggestions(s)))].filter(s => !themes.includes(s));
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" style={{maxWidth:480}} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="modal-title">Set Theme</span>
+                <span style={{color:'var(--muted)', fontWeight:400, marginLeft:8, fontSize:13}}>
+                  for {symbols.length} asset{symbols.length > 1 ? 's' : ''}
+                </span>
+              </div>
+              <button className="modal-close" onClick={onClose}>×</button>
+            </div>
+
+            <div style={{marginBottom:12}}>
+              <div className="form-label" style={{marginBottom:8}}>Themes to add</div>
+              <div className="current-themes">
+                {themes.length === 0 && <span style={{color:'var(--muted)', fontSize:13}}>No themes added yet</span>}
+                {themes.map(t => (
+                  <span key={t} className="theme-chip-removable">
+                    {t}
+                    <button onClick={() => remove(t)}>×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="theme-input-row">
+              <input
+                ref={inputRef}
+                className="form-input"
+                placeholder="Type a theme and press Enter…"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+              />
+              <button className="btn btn-secondary" onClick={() => add(input)} disabled={!input.trim()}>Add</button>
+            </div>
+
+            {suggestions.length > 0 && (
+              <div style={{marginTop:16}}>
+                <div className="suggestions-label">Suggested</div>
+                <div className="suggestion-chips">
+                  {suggestions.map(s => (
+                    <span key={s} className={`suggestion-chip ${themes.includes(s) ? 'used' : ''}`}
+                      onClick={() => !themes.includes(s) && add(s)}>
+                      + {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{marginTop:12, padding:'8px 12px', background:'var(--bg)', borderRadius:6, fontSize:12, color:'var(--muted)'}}>
+              Applying to: {symbols.join(', ')}
+            </div>
+
+            <div className="form-actions" style={{marginTop:20}}>
+              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={themes.length === 0}>Save</button>
             </div>
           </div>
         </div>
@@ -1570,6 +1724,7 @@
       const [newPw, setNewPw]               = useState('');
       const [pwMsg, setPwMsg]               = useState('');
       const [showLegal, setShowLegal]       = useState(null); // 'terms' | 'privacy'
+      const [bulkThemeSymbols, setBulkThemeSymbols] = useState(null);
 
       // Check auth on mount
       useEffect(() => {
@@ -1759,6 +1914,7 @@
                 onRemove={handleRemove}
                 onRowClick={setDetailStock}
                 onEditThemes={setThemeStock}
+                onBulkTheme={setBulkThemeSymbols}
               />
             ) : (
               <div className="stock-grid">
@@ -1799,6 +1955,21 @@
               stock={themeStock}
               onClose={() => setThemeStock(null)}
               onSave={handleThemeSave}
+            />
+          )}
+
+          {bulkThemeSymbols && (
+            <BulkThemeModal
+              symbols={bulkThemeSymbols}
+              watchlist={watchlist}
+              onClose={() => setBulkThemeSymbols(null)}
+              onSave={(syms, themes) => {
+                setWatchlist(prev => prev.map(s =>
+                  syms.includes(s.symbol)
+                    ? { ...s, themes: [...new Set([...(s.themes || []), ...themes])] }
+                    : s
+                ));
+              }}
             />
           )}
 
