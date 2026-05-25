@@ -178,6 +178,19 @@ def get_or_create_user(identifier):
     return row
 
 
+def get_all_users():
+    conn = _conn()
+    if PG:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cur = conn.cursor()
+    cur.execute(_q('SELECT id, identifier, created_at, last_login FROM users ORDER BY created_at DESC'))
+    rows = _fetchall(cur)
+    cur.close()
+    conn.close()
+    return rows
+
+
 def get_user_by_identifier(identifier):
     conn = _conn()
     if PG:

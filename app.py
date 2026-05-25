@@ -285,6 +285,27 @@ def get_competitors(symbol):
     return jsonify(competitors)
 
 
+@app.route('/api/admin/users', methods=['GET'])
+def admin_users():
+    secret = os.environ.get('ADMIN_SECRET')
+    if not secret:
+        return jsonify({'error': 'Admin not configured'}), 403
+    if request.args.get('key') != secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+    users = database.get_all_users()
+    watchlist_counts = {}
+    for u in users:
+        wl = database.get_watchlist(u['id'])
+        watchlist_counts[u['id']] = len(wl)
+    return jsonify([{
+        'id':         u['id'],
+        'email':      u['identifier'],
+        'joined':     str(u['created_at']),
+        'last_login': str(u['last_login']) if u['last_login'] else None,
+        'watchlist':  watchlist_counts[u['id']],
+    } for u in users])
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3001))
     app.run(debug=False, port=port, use_reloader=False)
