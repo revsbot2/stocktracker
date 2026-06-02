@@ -20,11 +20,13 @@ def get_asset_data(symbol):
         ticker = yf.Ticker(symbol)
         info = ticker.info
 
-        # Bail early if Yahoo returned an empty/error response
-        if not info or info.get('quoteType') is None:
+        # Bail early if Yahoo returned a truly empty/error response
+        has_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+        has_identity = info.get('quoteType') or info.get('symbol') or info.get('shortName')
+        if not info or (not has_price and not has_identity):
             return None
 
-        asset_type = info.get('quoteType', 'EQUITY')
+        asset_type = info.get('quoteType') or 'EQUITY'
 
         price = (
             info.get('currentPrice')
