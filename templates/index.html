@@ -429,12 +429,12 @@
     .view-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
 
     /* Table view */
-    .table-wrapper { overflow-x: auto; margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; }
+    .table-wrapper { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 160px); margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     thead { background: #0d1117; }
     thead th {
       position: sticky;
-      top: 56px; /* height of navbar */
+      top: 0;
       z-index: 2;
       background: #0d1117;
     }
