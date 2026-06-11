@@ -144,6 +144,7 @@
     .badge-ETF     { background: #1d2b1d; color: var(--green); }
     .badge-BOND    { background: #2a251a; color: var(--yellow); }
     .badge-FUTURE  { background: #2a1d2d; color: var(--purple); }
+    .badge-MUTUALFUND { background: #2d2438; color: var(--purple); }
     .badge-default { background: #22272e; color: var(--muted); }
 
     /* Price section */
@@ -781,8 +782,8 @@
 
     // ─── TypeBadge ───────────────────────────────────────────────────────────
     function TypeBadge({ type }) {
-      const cls = ['EQUITY','ETF','BOND','FUTURE'].includes(type) ? `badge-${type}` : 'badge-default';
-      return <span className={`type-badge ${cls}`}>{type || 'EQUITY'}</span>;
+      const cls = ['EQUITY','ETF','BOND','FUTURE','MUTUALFUND'].includes(type) ? `badge-${type}` : 'badge-default';
+      return <span className={`type-badge ${cls}`}>{type === 'MUTUALFUND' ? 'FUND' : (type || 'EQUITY')}</span>;
     }
 
     // ─── StockCard ───────────────────────────────────────────────────────────
@@ -815,6 +816,42 @@
             )}
           </div>
 
+          {stock.asset_type === 'MUTUALFUND' ? (
+            <div className="metrics-grid">
+              <div className="metric-item">
+                <div className="metric-label">Expense Ratio</div>
+                <div className="metric-value">{stock.expense_ratio != null ? (stock.expense_ratio * 100).toFixed(2) + '%' : 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">YTD Return</div>
+                <div className="metric-value">{stock.ytd_return != null ? (stock.ytd_return * 100).toFixed(1) + '%' : 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">3Y Return</div>
+                <div className="metric-value">{stock.three_year_return != null ? (stock.three_year_return * 100).toFixed(1) + '%' : 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">5Y Return</div>
+                <div className="metric-value">{stock.five_year_return != null ? (stock.five_year_return * 100).toFixed(1) + '%' : 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">Total Assets</div>
+                <div className="metric-value">{fmt.cap(stock.total_assets)}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">Yield</div>
+                <div className="metric-value">{stock.fund_yield != null ? (stock.fund_yield * 100).toFixed(2) + '%' : 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">Category</div>
+                <div className="metric-value" style={{fontSize:11}}>{stock.category || 'N/A'}</div>
+              </div>
+              <div className="metric-item">
+                <div className="metric-label">Fund Family</div>
+                <div className="metric-value" style={{fontSize:11}}>{stock.fund_family || 'N/A'}</div>
+              </div>
+            </div>
+          ) : (
           <div className="metrics-grid">
             <div className="metric-item">
               <div className="metric-label">Market Cap</div>
@@ -849,13 +886,16 @@
               <div className="metric-value">{fmt.num(stock.short_ratio)}</div>
             </div>
           </div>
+          )}
 
+          {stock.asset_type !== 'MUTUALFUND' && (
           <div className="consensus-row">
             <ConsensusBadge consensus={stock.analyst_consensus} />
             {stock.num_analysts && (
               <span className="consensus-analysts">{stock.num_analysts} analysts</span>
             )}
           </div>
+          )}
 
           {stock.last_updated && (
             <div className="card-footer">Updated {fmt.updated(stock.last_updated)}</div>
@@ -927,6 +967,36 @@
               )}
               <TypeBadge type={stock.asset_type} />
             </div>
+
+            {/* Fund factors (mutual funds) */}
+            {stock.asset_type === 'MUTUALFUND' && (
+              <div className="detail-section">
+                <div className="detail-section-title">Fund Factors</div>
+                <div className="detail-metrics">
+                  {[
+                    ['Expense Ratio', stock.expense_ratio != null ? (stock.expense_ratio * 100).toFixed(2) + '%' : 'N/A'],
+                    ['YTD Return',    stock.ytd_return != null ? (stock.ytd_return * 100).toFixed(1) + '%' : 'N/A'],
+                    ['3Y Avg Return', stock.three_year_return != null ? (stock.three_year_return * 100).toFixed(1) + '%' : 'N/A'],
+                    ['5Y Avg Return', stock.five_year_return != null ? (stock.five_year_return * 100).toFixed(1) + '%' : 'N/A'],
+                    ['Total Assets',  fmt.cap(stock.total_assets)],
+                    ['Yield',         stock.fund_yield != null ? (stock.fund_yield * 100).toFixed(2) + '%' : 'N/A'],
+                    ['Category',      stock.category || 'N/A'],
+                    ['Fund Family',   stock.fund_family || 'N/A'],
+                  ].map(([label, val]) => (
+                    <div key={label}>
+                      <div className="detail-metric-label">{label}</div>
+                      <div className="detail-metric-value">{val}</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="description-text" style={{marginTop:10}}>
+                  Factors that drive a mutual fund's value: the performance of its underlying holdings
+                  (reflected in NAV and the returns above), fees (expense ratio reduces returns),
+                  income distributions (yield), fund flows (total assets), and the fund's category
+                  benchmark and management approach.
+                </p>
+              </div>
+            )}
 
             {/* Key metrics */}
             <div className="detail-section">

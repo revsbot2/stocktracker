@@ -51,7 +51,7 @@ def _quotesummary_fallback(symbol):
     """
     try:
         session, crumb = _get_yahoo_session()
-        modules = 'price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,assetProfile'
+        modules = 'price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,assetProfile,fundProfile'
         params = {'modules': modules}
         if crumb:
             params['crumb'] = crumb
@@ -121,8 +121,18 @@ def _quotesummary_fallback(symbol):
             'sharesShort':             v('defaultKeyStatistics', 'sharesShort'),
             'shortPercentOfFloat':     v('defaultKeyStatistics', 'shortPercentOfFloat'),
             'shortRatio':              v('defaultKeyStatistics', 'shortRatio'),
+            # Mutual fund / ETF specific
+            'annualReportExpenseRatio': v('fundProfile', 'annualReportExpenseRatio') or v('defaultKeyStatistics', 'annualReportExpenseRatio'),
+            'ytdReturn':               v('summaryDetail', 'ytdReturn') or v('defaultKeyStatistics', 'ytdReturn'),
+            'threeYearAverageReturn':  v('defaultKeyStatistics', 'threeYearAverageReturn'),
+            'fiveYearAverageReturn':   v('defaultKeyStatistics', 'fiveYearAverageReturn'),
+            'totalAssets':             v('summaryDetail', 'totalAssets'),
+            'fundFamily':              v('defaultKeyStatistics', 'fundFamily') or (r.get('fundProfile') or {}).get('family'),
+            'category':                (r.get('fundProfile') or {}).get('categoryName') or v('defaultKeyStatistics', 'category'),
+            'yield':                   v('summaryDetail', 'yield'),
+            'navPrice':                v('summaryDetail', 'navPrice'),
         }
-        if not info['currentPrice']:
+        if not info['currentPrice'] and not info['navPrice']:
             return None
         return info
     except Exception as e:
@@ -157,6 +167,14 @@ def _fast_info_fallback(ticker, symbol):
     except Exception as e:
         print(f"[data_fetcher] fast_info fallback failed for {symbol}: {e}")
         return None
+
+
+def _as_fraction(val):
+    """Yahoo sometimes returns returns/ratios as percents (e.g. 11.2) instead of
+    fractions (0.112). Normalize to a fraction so the UI can always multiply by 100."""
+    if val is None:
+        return None
+    return val / 100 if abs(val) > 1 else val
 
 
 def get_asset_data(symbol):
@@ -235,6 +253,16 @@ def get_asset_data(symbol):
             'shares_short': info.get('sharesShort'),
             'short_percent_float': info.get('shortPercentOfFloat'),
             'short_ratio': info.get('shortRatio'),
+            # Mutual fund / ETF specific
+            'expense_ratio': _as_fraction(info.get('annualReportExpenseRatio') or info.get('netExpenseRatio')),
+            'ytd_return': _as_fraction(info.get('ytdReturn')),
+            'three_year_return': _as_fraction(info.get('threeYearAverageReturn')),
+            'five_year_return': _as_fraction(info.get('fiveYearAverageReturn')),
+            'total_assets': info.get('totalAssets'),
+            'fund_family': info.get('fundFamily'),
+            'category': info.get('category'),
+            'fund_yield': info.get('yield'),
+            'nav_price': info.get('navPrice'),
             'description': (info.get('longBusinessSummary') or '')[:600],
             'website': info.get('website', ''),
             'country': info.get('country', ''),
@@ -288,7 +316,7 @@ def search_tickers(query):
             name = q.get('longname') or q.get('shortname') or symbol
             quote_type = q.get('quoteType', 'EQUITY')
             exchange = q.get('exchange', '')
-            if symbol and quote_type not in ('OPTION', 'MUTUALFUND'):
+            if symbol and quote_type != 'OPTION':
                 results.append({
                     'symbol': symbol,
                     'name': name,
