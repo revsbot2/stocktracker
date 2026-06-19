@@ -5,3 +5,4 @@ APScheduler
 requests
 gunicorn
 Werkzeug
+pdfminer.six

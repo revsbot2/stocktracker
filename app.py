@@ -1,5 +1,7 @@
 import atexit
 import os
+import time
+import requests as _req
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory, make_response, g
@@ -359,6 +361,208 @@ def admin_users():
         'last_login': str(u['last_login']) if u['last_login'] else None,
         'watchlist':  watchlist_counts[u['id']],
     } for u in users])
+
+
+# ---------------------------------------------------------------------------
+# Politicians / congressional trades  (via House Clerk official disclosures)
+# ---------------------------------------------------------------------------
+
+import re as _re
+import sys as _sys
+import types as _types
+import io as _io
+
+# pdfminer.six is installed but needs cryptography; we fake it since PTR PDFs are unencrypted
+def _ensure_fake_crypto():
+    if 'cryptography' not in _sys.modules:
+        class _FO:
+            def __init__(self, *a, **kw): pass
+            def __call__(self, *a, **kw): return _FO()
+            def __getattr__(self, n): return _FO()
+        for _m in [
+            'cryptography', 'cryptography.hazmat', 'cryptography.hazmat.backends',
+            'cryptography.hazmat.primitives', 'cryptography.hazmat.primitives.ciphers',
+            'cryptography.hazmat.primitives.ciphers.algorithms',
+            'cryptography.hazmat.primitives.ciphers.modes',
+            'cryptography.hazmat.primitives.padding',
+            'cryptography.hazmat.primitives.hashes',
+        ]:
+            _sys.modules[_m] = _types.ModuleType(_m)
+        _sys.modules['cryptography.hazmat.backends'].default_backend = _FO
+        _sys.modules['cryptography.hazmat.primitives.ciphers'].Cipher = _FO
+        _sys.modules['cryptography.hazmat.primitives.ciphers.algorithms'].AES = _FO
+        _sys.modules['cryptography.hazmat.primitives.ciphers.algorithms'].ARC4 = _FO
+        _sys.modules['cryptography.hazmat.primitives.ciphers.modes'].CBC = _FO
+        _sys.modules['cryptography.hazmat.primitives.padding'].PKCS7 = _FO
+        _sys.modules['cryptography.hazmat.primitives.hashes'].MD5 = _FO
+
+_HOUSE_BASE = 'https://disclosures-clerk.house.gov'
+_HOUSE_SEARCH = _HOUSE_BASE + '/FinancialDisclosure/ViewMemberSearchResult'
+_HOUSE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    'Content-Type': 'application/x-www-form-urlencoded',
+}
+
+_pol_cache = {'data': None, 'ts': 0}
+_POL_TTL   = 43200  # 12 hours (PDF parsing is slow)
+
+
+def _extract_pdf_text(pdf_bytes):
+    """Extract plain text from a PDF using pdfminer.six with a fake crypto shim."""
+    try:
+        _ensure_fake_crypto()
+        from pdfminer.high_level import extract_text
+        return extract_text(_io.BytesIO(pdf_bytes))
+    except Exception as e:
+        print(f'[politicians] PDF extract error: {e}')
+        return ''
+
+
+def _parse_ptr_text(text, politician_name, doc_id):
+    """Parse pdfminer text from a House PTR into a list of trade dicts."""
+    trades = []
+    # Strip null bytes that pdfminer leaves from wide-char fonts
+    text = text.replace('\x00', '')
+    text = _re.sub(r'[ \t]+', ' ', text)
+
+    # Each transaction block contains:
+    #   (<TICKER>) [OP/ST/...] P/S/E  MM/DD/YYYY  MM/DD/YYYY  $X - $Y
+    # Works for both compact (one line) and multi-line PDF layout formats.
+    pat = _re.compile(
+        r'\(([A-Z][A-Z0-9\.\-]{0,9})\)'          # (TICKER)
+        r'\s*\[[A-Z]+\]'                            # [OP] / [ST] / etc
+        r'\s*(P|S\s*\(partial\)|S\s*\(full\)|S|E)' # transaction type
+        r'\s*(\d{2}/\d{2}/\d{4})'                  # transaction date
+        r'\s*\d{2}/\d{2}/\d{4}'                    # notification date (ignore)
+        r'\s*(\$[\d,]+\s*-\s*\$[\d,]+|Over \$[\d,]+|[\$\d,]+ or less)',  # amount
+        _re.DOTALL
+    )
+    for m in pat.finditer(text):
+        ticker    = m.group(1)
+        raw_type  = m.group(2).strip()
+        raw_date  = m.group(3)
+        amount    = m.group(4).strip()
+
+        if raw_type == 'P':
+            trade_type = 'purchase'
+        elif 'partial' in raw_type:
+            trade_type = 'sale_partial'
+        elif 'full' in raw_type:
+            trade_type = 'sale_full'
+        elif raw_type == 'E':
+            trade_type = 'exchange'
+        else:
+            trade_type = 'sale'
+
+        try:
+            d = datetime.strptime(raw_date, '%m/%d/%Y')
+            iso_date = d.strftime('%Y-%m-%d')
+        except Exception:
+            iso_date = raw_date
+
+        trades.append({
+            'chamber':          'House',
+            'politician':       politician_name,
+            'ticker':           ticker,
+            'asset_description': '',
+            'type':             trade_type,
+            'amount':           amount.replace('\n', '').strip(),
+            'transaction_date': iso_date,
+            'disclosure_date':  iso_date,
+            'owner':            'self',
+            'filing_url':       f'{_HOUSE_BASE}/public_disc/ptr-pdfs/{iso_date[:4]}/{doc_id}.pdf',
+        })
+    return trades
+
+
+def _fetch_pol():
+    now = time.time()
+    if _pol_cache['data'] is not None and now - _pol_cache['ts'] < _POL_TTL:
+        return _pol_cache['data']
+
+    print('[politicians] Starting fresh fetch from House Clerk…')
+    all_trades = []
+    seen_docs  = set()
+
+    # ── Step 1: Get list of all 2025 PTR filers ──────────────────────────────
+    for year in [str(datetime.now().year), str(datetime.now().year - 1)]:
+        try:
+            r = _req.post(
+                _HOUSE_SEARCH,
+                data=f'LastName=&FirstName=&FilingYear={year}&State=&District=&FDType=P',
+                headers=_HOUSE_HEADERS, timeout=30,
+            )
+            if not r.ok:
+                continue
+
+            # Parse rows: name + href link
+            row_pat = _re.compile(
+                r'<a href="(public_disc/ptr-pdfs/\d+/(\d+)\.pdf)"[^>]*>([^<]+)</a>'
+                r'.*?<td[^>]*>([^<]+)</td>'    # office/district
+                r'.*?<td[^>]*>([^<]+)</td>'    # filing year
+                r'.*?<td[^>]*>([^<]+)</td>',   # filing type label
+                _re.DOTALL
+            )
+            for m in row_pat.finditer(r.text):
+                link, doc_id, raw_name, office, f_year, f_type = (
+                    m.group(1), m.group(2), m.group(3).strip(),
+                    m.group(4).strip(), m.group(5).strip(), m.group(6).strip(),
+                )
+                # Skip amendments (we already have the original)
+                if 'Amendment' in f_type and doc_id in seen_docs:
+                    continue
+                seen_docs.add(doc_id)
+
+                # Normalize name: "Pelosi, Hon.. Nancy" → "Nancy Pelosi"
+                clean = _re.sub(r'Hon\.\s*', '', raw_name).strip()
+                parts = [p.strip() for p in clean.split(',', 1)]
+                display = f'{parts[1]} {parts[0]}' if len(parts) == 2 else clean
+
+                all_trades.append((doc_id, display, office, link))
+
+        except Exception as e:
+            print(f'[politicians] Search error year={year}: {e}')
+
+    print(f'[politicians] Found {len(all_trades)} PTR filings; downloading PDFs…')
+
+    # ── Step 2: Download + parse PDFs (most recent first, cap at 80) ─────────
+    trades = []
+    for doc_id, name, office, link in all_trades[:80]:
+        pdf_url = f'{_HOUSE_BASE}/{link}'
+        try:
+            r = _req.get(pdf_url, headers={'User-Agent': _HOUSE_HEADERS['User-Agent']},
+                         timeout=20)
+            if not r.ok:
+                continue
+            text = _extract_pdf_text(r.content)
+            if text:
+                parsed = _parse_ptr_text(text, name, doc_id)
+                trades.extend(parsed)
+                print(f'[politicians]  {name}: {len(parsed)} trades from doc {doc_id}')
+            time.sleep(0.2)  # be polite to the government server
+        except Exception as e:
+            print(f'[politicians]  skip {doc_id} ({name}): {e}')
+
+    trades.sort(key=lambda x: x['transaction_date'], reverse=True)
+    print(f'[politicians] Done. {len(trades)} total trades.')
+    _pol_cache['data'] = trades
+    _pol_cache['ts']   = now
+    return trades
+
+
+# Warm politicians cache on startup and refresh every 12 h
+scheduler.add_job(func=_fetch_pol, trigger='date', id='pol_warmup')
+scheduler.add_job(func=_fetch_pol, trigger='interval', hours=12, id='pol_refresh')
+
+
+@app.route('/api/politicians', methods=['GET'])
+@require_auth
+def get_politicians():
+    try:
+        data = _fetch_pol()
+        return jsonify(data[:2000])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
