@@ -403,8 +403,12 @@ _HOUSE_HEADERS = {
     'Content-Type': 'application/x-www-form-urlencoded',
 }
 
-_pol_cache = {'data': None, 'ts': 0}
-_POL_TTL   = 43200  # 12 hours (PDF parsing is slow)
+import threading as _threading
+
+_pol_cache    = {'data': None, 'ts': 0}
+_pol_lock     = _threading.Lock()
+_pol_fetching = False
+_POL_TTL      = 43200  # 12 hours
 
 
 def _extract_pdf_text(pdf_bytes):
@@ -475,79 +479,92 @@ def _parse_ptr_text(text, politician_name, doc_id):
     return trades
 
 
-def _fetch_pol():
+def _fetch_pol_background():
+    """Download and parse PTR PDFs; runs in a background thread."""
+    global _pol_fetching
     now = time.time()
-    if _pol_cache['data'] is not None and now - _pol_cache['ts'] < _POL_TTL:
-        return _pol_cache['data']
 
-    print('[politicians] Starting fresh fetch from House Clerk…')
-    all_trades = []
-    seen_docs  = set()
+    with _pol_lock:
+        if _pol_fetching:
+            return                          # another thread is already fetching
+        if _pol_cache['data'] is not None and now - _pol_cache['ts'] < _POL_TTL:
+            return                          # cache still fresh
+        _pol_fetching = True
 
-    # ── Step 1: Get list of all 2025 PTR filers ──────────────────────────────
-    for year in [str(datetime.now().year), str(datetime.now().year - 1)]:
-        try:
-            r = _req.post(
-                _HOUSE_SEARCH,
-                data=f'LastName=&FirstName=&FilingYear={year}&State=&District=&FDType=P',
-                headers=_HOUSE_HEADERS, timeout=30,
-            )
-            if not r.ok:
-                continue
+    try:
+        print('[politicians] Starting fresh fetch from House Clerk…')
+        all_filings = []
+        seen_docs   = set()
 
-            # Parse rows: name + href link
-            row_pat = _re.compile(
-                r'<a href="(public_disc/ptr-pdfs/\d+/(\d+)\.pdf)"[^>]*>([^<]+)</a>'
-                r'.*?<td[^>]*>([^<]+)</td>'    # office/district
-                r'.*?<td[^>]*>([^<]+)</td>'    # filing year
-                r'.*?<td[^>]*>([^<]+)</td>',   # filing type label
-                _re.DOTALL
-            )
-            for m in row_pat.finditer(r.text):
-                link, doc_id, raw_name, office, f_year, f_type = (
-                    m.group(1), m.group(2), m.group(3).strip(),
-                    m.group(4).strip(), m.group(5).strip(), m.group(6).strip(),
+        for year in [str(datetime.now().year), str(datetime.now().year - 1)]:
+            try:
+                r = _req.post(
+                    _HOUSE_SEARCH,
+                    data=f'LastName=&FirstName=&FilingYear={year}&State=&District=&FDType=P',
+                    headers=_HOUSE_HEADERS, timeout=30,
                 )
-                # Skip amendments (we already have the original)
-                if 'Amendment' in f_type and doc_id in seen_docs:
+                if not r.ok:
                     continue
-                seen_docs.add(doc_id)
+                row_pat = _re.compile(
+                    r'<a href="(public_disc/ptr-pdfs/\d+/(\d+)\.pdf)"[^>]*>([^<]+)</a>'
+                    r'.*?<td[^>]*>([^<]+)</td>'
+                    r'.*?<td[^>]*>([^<]+)</td>'
+                    r'.*?<td[^>]*>([^<]+)</td>',
+                    _re.DOTALL,
+                )
+                for m in row_pat.finditer(r.text):
+                    link, doc_id, raw_name = m.group(1), m.group(2), m.group(3).strip()
+                    f_type = m.group(6).strip()
+                    if doc_id in seen_docs:
+                        continue
+                    seen_docs.add(doc_id)
+                    clean  = _re.sub(r'Hon\.\s*\.?\s*', '', raw_name).strip()
+                    parts  = [p.strip() for p in clean.split(',', 1)]
+                    display = f'{parts[1]} {parts[0]}' if len(parts) == 2 else clean
+                    all_filings.append((doc_id, display, link))
+            except Exception as e:
+                print(f'[politicians] Search error year={year}: {e}')
 
-                # Normalize name: "Pelosi, Hon.. Nancy" → "Nancy Pelosi"
-                clean = _re.sub(r'Hon\.\s*', '', raw_name).strip()
-                parts = [p.strip() for p in clean.split(',', 1)]
-                display = f'{parts[1]} {parts[0]}' if len(parts) == 2 else clean
+        print(f'[politicians] Found {len(all_filings)} PTR filings; downloading first 25…')
+        trades = []
+        for doc_id, name, link in all_filings[:25]:
+            try:
+                r = _req.get(f'{_HOUSE_BASE}/{link}',
+                             headers={'User-Agent': _HOUSE_HEADERS['User-Agent']},
+                             timeout=20)
+                if r.ok:
+                    text = _extract_pdf_text(r.content)
+                    if text:
+                        parsed = _parse_ptr_text(text, name, doc_id)
+                        trades.extend(parsed)
+                        print(f'[politicians]  {name}: {len(parsed)} trades')
+                time.sleep(0.15)
+            except Exception as e:
+                print(f'[politicians]  skip {doc_id}: {e}')
 
-                all_trades.append((doc_id, display, office, link))
+        trades.sort(key=lambda x: x['transaction_date'], reverse=True)
+        print(f'[politicians] Done – {len(trades)} total trades cached.')
+        with _pol_lock:
+            _pol_cache['data'] = trades
+            _pol_cache['ts']   = time.time()
+    finally:
+        with _pol_lock:
+            _pol_fetching = False
 
-        except Exception as e:
-            print(f'[politicians] Search error year={year}: {e}')
 
-    print(f'[politicians] Found {len(all_trades)} PTR filings; downloading PDFs…')
+def _fetch_pol():
+    """Return cached data immediately; kick off background refresh if needed."""
+    now = time.time()
+    with _pol_lock:
+        fresh = (_pol_cache['data'] is not None and now - _pol_cache['ts'] < _POL_TTL)
+        fetching = _pol_fetching
 
-    # ── Step 2: Download + parse PDFs (most recent first, cap at 80) ─────────
-    trades = []
-    for doc_id, name, office, link in all_trades[:80]:
-        pdf_url = f'{_HOUSE_BASE}/{link}'
-        try:
-            r = _req.get(pdf_url, headers={'User-Agent': _HOUSE_HEADERS['User-Agent']},
-                         timeout=20)
-            if not r.ok:
-                continue
-            text = _extract_pdf_text(r.content)
-            if text:
-                parsed = _parse_ptr_text(text, name, doc_id)
-                trades.extend(parsed)
-                print(f'[politicians]  {name}: {len(parsed)} trades from doc {doc_id}')
-            time.sleep(0.2)  # be polite to the government server
-        except Exception as e:
-            print(f'[politicians]  skip {doc_id} ({name}): {e}')
+    if not fresh and not fetching:
+        t = _threading.Thread(target=_fetch_pol_background, daemon=True)
+        t.start()
 
-    trades.sort(key=lambda x: x['transaction_date'], reverse=True)
-    print(f'[politicians] Done. {len(trades)} total trades.')
-    _pol_cache['data'] = trades
-    _pol_cache['ts']   = now
-    return trades
+    with _pol_lock:
+        return _pol_cache['data'] or []
 
 
 # Warm politicians cache on startup and refresh every 12 h
@@ -560,7 +577,9 @@ scheduler.add_job(func=_fetch_pol, trigger='interval', hours=12, id='pol_refresh
 def get_politicians():
     try:
         data = _fetch_pol()
-        return jsonify(data[:2000])
+        with _pol_lock:
+            loading = _pol_fetching
+        return jsonify({'trades': data[:2000], 'loading': loading})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

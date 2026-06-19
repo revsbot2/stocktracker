@@ -2004,17 +2004,30 @@
       const [chamber, setChamber]         = useState('ALL');
       const [tradeType, setTradeType]     = useState('ALL');
       const [expanded, setExpanded]       = useState(new Set());
+      const pollRef = useRef(null);
+
+      const fetchData = useCallback(async () => {
+        try {
+          const r = await fetch('/api/politicians', { credentials: 'include' });
+          const json = await r.json();
+          if (json.error) { setError(json.error); setLoading(false); return; }
+          setTrades(json.trades || []);
+          if (json.loading) {
+            // Still building cache — poll every 8 seconds
+            pollRef.current = setTimeout(fetchData, 8000);
+          } else {
+            setLoading(false);
+          }
+        } catch {
+          setError('Failed to load data — check your connection.');
+          setLoading(false);
+        }
+      }, []);
 
       useEffect(() => {
-        fetch('/api/politicians', { credentials: 'include' })
-          .then(r => r.json())
-          .then(data => {
-            if (data && data.error) setError(data.error);
-            else setTrades(Array.isArray(data) ? data : []);
-            setLoading(false);
-          })
-          .catch(() => { setError('Failed to load data — check your connection.'); setLoading(false); });
-      }, []);
+        fetchData();
+        return () => clearTimeout(pollRef.current);
+      }, [fetchData]);
 
       const byPolitician = useMemo(() => {
         const map = {};
@@ -2076,7 +2089,13 @@
         return type ? type.charAt(0).toUpperCase() + type.slice(1) : '—';
       };
 
-      if (loading) return <div className="loading"><div className="spinner" />Loading politician trades…</div>;
+      if (loading && trades.length === 0) return (
+        <div className="loading">
+          <div className="spinner" />
+          <div>Fetching congressional disclosures from house.gov…</div>
+          <div style={{fontSize:12, color:'var(--muted)', marginTop:8}}>Parsing PTR filings — takes about 30 seconds on first load</div>
+        </div>
+      );
 
       if (error) return (
         <div className="empty-state">
