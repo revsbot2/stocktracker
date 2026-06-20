@@ -1,4 +1,5 @@
 import atexit
+import json
 import os
 import time
 import requests as _req
@@ -410,6 +411,65 @@ _pol_lock     = _threading.Lock()
 _pol_fetching = False
 _POL_TTL      = 43200  # 12 hours
 
+# Tracked politicians — persisted to disk
+_TRACKED_FILE = os.path.join(os.path.dirname(__file__), 'tracked_politicians.json')
+_tracked_pols = []   # list of {first_name, last_name, display_name}
+_tracked_lock = _threading.Lock()
+
+def _load_tracked():
+    global _tracked_pols
+    try:
+        if os.path.exists(_TRACKED_FILE):
+            with open(_TRACKED_FILE) as f:
+                _tracked_pols = json.load(f)
+    except Exception:
+        _tracked_pols = []
+
+def _save_tracked():
+    try:
+        with open(_TRACKED_FILE, 'w') as f:
+            json.dump(_tracked_pols, f)
+    except Exception as e:
+        print(f'[politicians] Failed to save tracked list: {e}')
+
+_load_tracked()
+
+# Pre-compiled regex to parse House Clerk PTR filing rows from HTML
+_ROW_PAT = _re.compile(
+    r'<a href="(public_disc/ptr-pdfs/\d+/(\d+)\.pdf)"[^>]*>([^<]+)</a>'
+    r'.*?<td[^>]*>([^<]+)</td>'
+    r'.*?<td[^>]*>([^<]+)</td>'
+    r'.*?<td[^>]*>([^<]+)</td>',
+    _re.DOTALL,
+)
+
+
+def _search_house_clerk(last_name='', first_name=''):
+    """Return list of (doc_id, display_name, link) for PTR filings matching the given name."""
+    filings = []
+    seen = set()
+    for year in [str(datetime.now().year), str(datetime.now().year - 1)]:
+        try:
+            r = _req.post(
+                _HOUSE_SEARCH,
+                data=f'LastName={last_name}&FirstName={first_name}&FilingYear={year}&State=&District=&FDType=P',
+                headers=_HOUSE_HEADERS, timeout=30,
+            )
+            if not r.ok:
+                continue
+            for m in _ROW_PAT.finditer(r.text):
+                link, doc_id, raw_name = m.group(1), m.group(2), m.group(3).strip()
+                if doc_id in seen:
+                    continue
+                seen.add(doc_id)
+                clean  = _re.sub(r'Hon\.\s*\.?\s*', '', raw_name).strip()
+                parts  = [p.strip() for p in clean.split(',', 1)]
+                display = f'{parts[1]} {parts[0]}' if len(parts) == 2 else clean
+                filings.append((doc_id, display, link))
+        except Exception as e:
+            print(f'[politicians] Search error ({last_name}): {e}')
+    return filings
+
 
 def _extract_pdf_text(pdf_bytes):
     """Extract plain text from a PDF using pdfminer.six with a fake crypto shim."""
@@ -486,48 +546,37 @@ def _fetch_pol_background():
 
     with _pol_lock:
         if _pol_fetching:
-            return                          # another thread is already fetching
+            return
         if _pol_cache['data'] is not None and now - _pol_cache['ts'] < _POL_TTL:
-            return                          # cache still fresh
+            return
         _pol_fetching = True
 
     try:
         print('[politicians] Starting fresh fetch from House Clerk…')
-        all_filings = []
-        seen_docs   = set()
 
-        for year in [str(datetime.now().year), str(datetime.now().year - 1)]:
-            try:
-                r = _req.post(
-                    _HOUSE_SEARCH,
-                    data=f'LastName=&FirstName=&FilingYear={year}&State=&District=&FDType=P',
-                    headers=_HOUSE_HEADERS, timeout=30,
-                )
-                if not r.ok:
-                    continue
-                row_pat = _re.compile(
-                    r'<a href="(public_disc/ptr-pdfs/\d+/(\d+)\.pdf)"[^>]*>([^<]+)</a>'
-                    r'.*?<td[^>]*>([^<]+)</td>'
-                    r'.*?<td[^>]*>([^<]+)</td>'
-                    r'.*?<td[^>]*>([^<]+)</td>',
-                    _re.DOTALL,
-                )
-                for m in row_pat.finditer(r.text):
-                    link, doc_id, raw_name = m.group(1), m.group(2), m.group(3).strip()
-                    f_type = m.group(6).strip()
-                    if doc_id in seen_docs:
-                        continue
-                    seen_docs.add(doc_id)
-                    clean  = _re.sub(r'Hon\.\s*\.?\s*', '', raw_name).strip()
-                    parts  = [p.strip() for p in clean.split(',', 1)]
-                    display = f'{parts[1]} {parts[0]}' if len(parts) == 2 else clean
-                    all_filings.append((doc_id, display, link))
-            except Exception as e:
-                print(f'[politicians] Search error year={year}: {e}')
+        # Targeted fetch for each tracked politician (no limit)
+        with _tracked_lock:
+            tracked = list(_tracked_pols)
 
-        print(f'[politicians] Found {len(all_filings)} PTR filings; downloading first 25…')
+        tracked_filings = []
+        seen_docs = set()
+        for pol in tracked:
+            for filing in _search_house_clerk(pol['last_name'], pol.get('first_name', '')):
+                if filing[0] not in seen_docs:
+                    seen_docs.add(filing[0])
+                    tracked_filings.append(filing)
+
+        # General fetch (all PTRs), fill up to 25 after deduping against tracked
+        general_filings = _search_house_clerk()
+        general_extra = [f for f in general_filings if f[0] not in seen_docs][:25]
+        for f in general_extra:
+            seen_docs.add(f[0])
+
+        all_to_download = tracked_filings + general_extra
+        print(f'[politicians] Downloading {len(tracked_filings)} tracked + {len(general_extra)} general filings…')
+
         trades = []
-        for doc_id, name, link in all_filings[:25]:
+        for doc_id, name, link in all_to_download:
             try:
                 r = _req.get(f'{_HOUSE_BASE}/{link}',
                              headers={'User-Agent': _HOUSE_HEADERS['User-Agent']},
@@ -582,6 +631,66 @@ def get_politicians():
         return jsonify({'trades': data[:2000], 'loading': loading})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/politicians/tracked', methods=['GET'])
+@require_auth
+def get_tracked_politicians():
+    with _tracked_lock:
+        return jsonify({'tracked': list(_tracked_pols)})
+
+
+@app.route('/api/politicians/tracked', methods=['POST'])
+@require_auth
+def add_tracked_politician():
+    body  = request.get_json(force=True, silent=True) or {}
+    first = (body.get('first_name') or '').strip()
+    last  = (body.get('last_name')  or '').strip()
+    if not last:
+        return jsonify({'error': 'last_name is required'}), 400
+    display = f'{first} {last}'.strip() if first else last
+    entry = {'first_name': first, 'last_name': last, 'display_name': display}
+
+    with _tracked_lock:
+        duplicate = any(
+            p['last_name'].lower() == last.lower() and
+            p.get('first_name', '').lower() == first.lower()
+            for p in _tracked_pols
+        )
+        if duplicate:
+            return jsonify({'error': 'Already tracking this politician'}), 409
+        _tracked_pols.append(entry)
+        _save_tracked()
+
+    # Invalidate cache so the next fetch picks up their filings
+    with _pol_lock:
+        _pol_cache['ts'] = 0
+    _threading.Thread(target=_fetch_pol_background, daemon=True).start()
+
+    return jsonify({'tracked': entry}), 201
+
+
+@app.route('/api/politicians/tracked', methods=['DELETE'])
+@require_auth
+def remove_tracked_politician():
+    body  = request.get_json(force=True, silent=True) or {}
+    first = (body.get('first_name') or '').strip()
+    last  = (body.get('last_name')  or '').strip()
+    if not last:
+        return jsonify({'error': 'last_name is required'}), 400
+
+    with _tracked_lock:
+        before = len(_tracked_pols)
+        _tracked_pols[:] = [
+            p for p in _tracked_pols
+            if not (p['last_name'].lower() == last.lower() and
+                    p.get('first_name', '').lower() == first.lower())
+        ]
+        if len(_tracked_pols) == before:
+            return jsonify({'error': 'Not found'}), 404
+        _save_tracked()
+
+    return jsonify({'ok': True})
 
 
 if __name__ == '__main__':
