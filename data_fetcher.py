@@ -1,3 +1,4 @@
+import netrc  # pre-import to avoid import-lock deadlock under gunicorn threads
 import threading
 import time
 import yfinance as yf
