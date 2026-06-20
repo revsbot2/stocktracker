@@ -1,8 +1,15 @@
 import atexit
+import io as _io
 import json
 import os
+import re as _re
+import sys as _sys
+import threading as _threading
 import time
+import traceback
+import types as _types
 import requests as _req
+import yfinance as _yf
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory, make_response, g
@@ -293,13 +300,12 @@ def debug_fetch(symbol):
     secret = os.environ.get('ADMIN_SECRET')
     if not secret or request.args.get('key') != secret:
         return jsonify({'error': 'Unauthorized'}), 401
-    import yfinance as yf, traceback
     results = {}
     sym = symbol.upper()
 
     # Test 1: ticker.info
     try:
-        t = yf.Ticker(sym)
+        t = _yf.Ticker(sym)
         info = t.info or {}
         results['ticker_info'] = {
             'keys': len(info),
@@ -368,11 +374,6 @@ def admin_users():
 # Politicians / congressional trades  (via House Clerk official disclosures)
 # ---------------------------------------------------------------------------
 
-import re as _re
-import sys as _sys
-import types as _types
-import io as _io
-
 # pdfminer.six is installed but needs cryptography; we fake it since PTR PDFs are unencrypted
 def _ensure_fake_crypto():
     if 'cryptography' not in _sys.modules:
@@ -397,14 +398,17 @@ def _ensure_fake_crypto():
         _sys.modules['cryptography.hazmat.primitives.padding'].PKCS7 = _FO
         _sys.modules['cryptography.hazmat.primitives.hashes'].MD5 = _FO
 
+# Install the shim and import pdfminer at module load time so there is nothing
+# left to lazily import when requests come in or background threads run.
+_ensure_fake_crypto()
+from pdfminer.high_level import extract_text as _pdf_extract_text
+
 _HOUSE_BASE = 'https://disclosures-clerk.house.gov'
 _HOUSE_SEARCH = _HOUSE_BASE + '/FinancialDisclosure/ViewMemberSearchResult'
 _HOUSE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
     'Content-Type': 'application/x-www-form-urlencoded',
 }
-
-import threading as _threading
 
 _pol_cache    = {'data': None, 'ts': 0}
 _pol_lock     = _threading.Lock()
@@ -474,9 +478,7 @@ def _search_house_clerk(last_name='', first_name=''):
 def _extract_pdf_text(pdf_bytes):
     """Extract plain text from a PDF using pdfminer.six with a fake crypto shim."""
     try:
-        _ensure_fake_crypto()
-        from pdfminer.high_level import extract_text
-        return extract_text(_io.BytesIO(pdf_bytes))
+        return _pdf_extract_text(_io.BytesIO(pdf_bytes))
     except Exception as e:
         print(f'[politicians] PDF extract error: {e}')
         return ''
