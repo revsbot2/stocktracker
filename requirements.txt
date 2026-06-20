@@ -6,3 +6,5 @@ requests
 gunicorn
 Werkzeug
 pdfminer.six
+psycopg2-binary
+curl_cffi

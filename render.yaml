@@ -3,5 +3,5 @@ services:
     name: stocktracker
     runtime: python
     pythonVersion: "3.11.9"
-    buildCommand: pip install flask flask-cors yfinance apscheduler requests werkzeug gunicorn curl_cffi psycopg2-binary pdfminer.six
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
