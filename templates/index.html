@@ -2014,6 +2014,29 @@
       );
     }
 
+    // ─── MorningstarBadge ────────────────────────────────────────────────────
+    function MorningstarBadge({ rating }) {
+      if (rating == null) return <span style={{color:'var(--muted)',fontSize:12}}>N/A</span>;
+      const stars = Math.round(Math.max(1, Math.min(5, rating)));
+      return (
+        <span title={`${stars} star${stars !== 1 ? 's' : ''}`} style={{color:'#f5a623',fontSize:14,letterSpacing:1}}>
+          {'★'.repeat(stars)}{'☆'.repeat(5 - stars)}
+        </span>
+      );
+    }
+
+    const FUND_CATEGORIES = [
+      'Large Cap Growth', 'Large Cap Value', 'Large Cap Blend',
+      'Mid Cap Growth', 'Mid Cap Value', 'Mid Cap Blend',
+      'Small Cap Growth', 'Small Cap Value', 'Small Cap Blend',
+      'International', 'Emerging Markets', 'Global',
+      'Short-Term Bond', 'Intermediate Bond', 'Long-Term Bond',
+      'High Yield Bond', 'Municipal Bond', 'Corporate Bond',
+      'Money Market', 'Real Estate', 'Commodities',
+      'Sector - Technology', 'Sector - Healthcare', 'Sector - Energy',
+      'Target Date', 'Balanced', 'Index',
+    ];
+
     // ─── FundCard ──────────────────────────────────────────────────────────
     function FundCard({ stock, onRemove, onClick, onEditCategory }) {
       const pos = stock.change_pct >= 0;
