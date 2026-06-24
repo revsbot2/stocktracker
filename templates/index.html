@@ -847,6 +847,33 @@
       return <span className={`type-badge ${cls}`}>{type === 'MUTUALFUND' ? 'FUND' : (type || 'EQUITY')}</span>;
     }
 
+    // ─── CongressBadge ───────────────────────────────────────────────────────
+    // Shows favorited politicians who recently bought/sold this stock.
+    // Note: PTR filings disclose transactions, not current holdings.
+    const polIsBuy  = t => t === 'purchase';
+    const polIsSell = t => typeof t === 'string' && t.startsWith('sale');
+
+    function CongressBadge({ politicians }) {
+      if (!politicians || politicians.length === 0) return null;
+      const buyers  = new Set(politicians.filter(p => polIsBuy(p.type)).map(p => p.name));
+      const sellers = new Set(politicians.filter(p => polIsSell(p.type)).map(p => p.name));
+      const names   = [...new Set(politicians.map(p => p.name))];
+      const color   = buyers.size && !sellers.size ? 'var(--green)'
+                    : sellers.size && !buyers.size ? 'var(--red)' : 'var(--purple)';
+      const parts = [];
+      if (buyers.size)  parts.push(`${buyers.size} bought`);
+      if (sellers.size) parts.push(`${sellers.size} sold`);
+      const label = parts.join(' · ') || `${names.length} traded`;
+      return (
+        <span title={names.join(', ')}
+          style={{display:'inline-flex', alignItems:'center', gap:5, background:'var(--surface)',
+                  border:`1px solid ${color}`, color, fontSize:11, fontWeight:600,
+                  padding:'3px 9px', borderRadius:14, whiteSpace:'nowrap'}}>
+          Congress · {label}
+        </span>
+      );
+    }
+
     // ─── StockCard ───────────────────────────────────────────────────────────
     function StockCard({ stock, onRemove, onClick, onEditThemes }) {
       const pos = stock.change_pct >= 0;
@@ -867,6 +894,10 @@
             ))}
             <span className="theme-chip-add" onClick={() => onEditThemes(stock)}>+ theme</span>
           </div>
+
+          {stock.politicians && stock.politicians.length > 0 && (
+            <div style={{marginBottom:10}}><CongressBadge politicians={stock.politicians} /></div>
+          )}
 
           <div className="price-row">
             <span className="price-main">{fmt.price(stock.price, stock.currency)}</span>
@@ -1028,6 +1059,36 @@
               )}
               <TypeBadge type={stock.asset_type} />
             </div>
+
+            {/* Congressional trades by favorited politicians */}
+            {stock.politicians && stock.politicians.length > 0 && (
+              <div className="detail-section">
+                <div className="detail-section-title">Tracked by Congress</div>
+                <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                  {stock.politicians.map((p, i) => {
+                    const buy = polIsBuy(p.type);
+                    const sell = polIsSell(p.type);
+                    const c = buy ? 'var(--green)' : sell ? 'var(--red)' : 'var(--muted)';
+                    const verb = buy ? 'Bought' : sell ? 'Sold' : (p.type || 'Traded');
+                    return (
+                      <div key={i} style={{display:'flex', alignItems:'center', gap:10, fontSize:13,
+                            padding:'7px 10px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8}}>
+                        <span style={{fontWeight:600, minWidth:130}}>{p.name}</span>
+                        <span style={{color:c, fontWeight:600}}>{verb}</span>
+                        <span style={{color:'var(--muted)'}}>{p.amount}</span>
+                        <span style={{color:'var(--muted)', marginLeft:'auto'}}>{p.date}</span>
+                        {p.url && <a href={p.url} target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()} style={{color:'var(--blue)', fontSize:12}}>filing</a>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="description-text" style={{marginTop:8}}>
+                  Periodic Transaction Report filings disclose individual purchases and sales — not
+                  current holdings. Amounts are the disclosed range.
+                </p>
+              </div>
+            )}
 
             {/* Fund factors (mutual funds) */}
             {stock.asset_type === 'MUTUALFUND' && (

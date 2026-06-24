@@ -197,11 +197,28 @@ def get_watchlist():
     user_id  = g.session_user['user_id']
     watchlist = database.get_watchlist(user_id)
     all_data  = database.get_all_asset_data()
+    symbols   = [item['symbol'] for item in watchlist]
+
+    # Join in trades by this user's favorited politicians, grouped by ticker
+    pol_map = {}
+    try:
+        for tr in database.get_politician_trades_for_user(user_id, symbols):
+            pol_map.setdefault(tr['ticker'], []).append({
+                'name':    tr['politician_name'],
+                'type':    tr['type'],
+                'date':    tr['transaction_date'],
+                'amount':  tr['amount'],
+                'url':     tr['filing_url'],
+                'chamber': tr['chamber'],
+            })
+    except Exception as e:
+        print(f'[politicians] watchlist join failed: {e}')
+
     result = []
     for item in watchlist:
         sym        = item['symbol']
         asset_data = all_data.get(sym, {})
-        result.append({**item, **asset_data})
+        result.append({**item, **asset_data, 'politicians': pol_map.get(sym, [])})
     return jsonify(result)
 
 
@@ -415,28 +432,21 @@ _pol_lock     = _threading.Lock()
 _pol_fetching = False
 _POL_TTL      = 43200  # 12 hours
 
-# Tracked politicians — persisted to disk
+# Tracked politicians are persisted per-user in the database (see database.py).
+# The legacy JSON file is migrated into the DB once at startup, then retired.
 _TRACKED_FILE = os.path.join(os.path.dirname(__file__), 'tracked_politicians.json')
-_tracked_pols = []   # list of {first_name, last_name, display_name}
-_tracked_lock = _threading.Lock()
 
-def _load_tracked():
-    global _tracked_pols
-    try:
-        if os.path.exists(_TRACKED_FILE):
-            with open(_TRACKED_FILE) as f:
-                _tracked_pols = json.load(f)
-    except Exception:
-        _tracked_pols = []
 
-def _save_tracked():
-    try:
-        with open(_TRACKED_FILE, 'w') as f:
-            json.dump(_tracked_pols, f)
-    except Exception as e:
-        print(f'[politicians] Failed to save tracked list: {e}')
+def _pol_key(*parts):
+    """Normalize a politician's name into a stable join key, order-independent.
 
-_load_tracked()
+    Works for both ('Nancy', 'Pelosi') and a full display name like
+    'Hon. Pelosi, Nancy' — both collapse to 'nancy_pelosi'.
+    """
+    text = ' '.join(p for p in parts if p)
+    text = _re.sub(r'\b(hon|mr|mrs|ms|dr)\b\.?', ' ', text, flags=_re.I)
+    tokens = sorted(t for t in _re.sub(r'[^a-z\s]', ' ', text.lower()).split() if len(t) > 1)
+    return '_'.join(tokens)
 
 # Pre-compiled regex to parse House Clerk PTR filing rows from HTML
 _ROW_PAT = _re.compile(
@@ -484,9 +494,10 @@ def _extract_pdf_text(pdf_bytes):
         return ''
 
 
-def _parse_ptr_text(text, politician_name, doc_id):
+def _parse_ptr_text(text, politician_name, doc_id, politician_key=None):
     """Parse pdfminer text from a House PTR into a list of trade dicts."""
     trades = []
+    pkey = politician_key or _pol_key(politician_name)
     # Strip null bytes that pdfminer leaves from wide-char fonts
     text = text.replace('\x00', '')
     text = _re.sub(r'[ \t]+', ' ', text)
@@ -529,6 +540,7 @@ def _parse_ptr_text(text, politician_name, doc_id):
         trades.append({
             'chamber':          'House',
             'politician':       politician_name,
+            'politician_key':   pkey,
             'ticker':           ticker,
             'asset_description': '',
             'type':             trade_type,
@@ -556,9 +568,12 @@ def _fetch_pol_background():
     try:
         print('[politicians] Starting fresh fetch from House Clerk…')
 
-        # Targeted fetch for each tracked politician (no limit)
-        with _tracked_lock:
-            tracked = list(_tracked_pols)
+        # Targeted fetch for the union of every user's tracked politicians
+        try:
+            tracked = database.get_all_tracked_distinct()
+        except Exception as e:
+            print(f'[politicians] Could not load tracked list: {e}')
+            tracked = []
 
         tracked_filings = []
         seen_docs = set()
@@ -586,6 +601,9 @@ def _fetch_pol_background():
                 if r.ok:
                     text = _extract_pdf_text(r.content)
                     if text:
+                        # Key is derived from the actual filer's name so the watchlist
+                        # join only matches genuine filings for a tracked politician
+                        # (a last-name search also returns unrelated same-surname filers).
                         parsed = _parse_ptr_text(text, name, doc_id)
                         trades.extend(parsed)
                         print(f'[politicians]  {name}: {len(parsed)} trades')
@@ -595,6 +613,10 @@ def _fetch_pol_background():
 
         trades.sort(key=lambda x: x['transaction_date'], reverse=True)
         print(f'[politicians] Done – {len(trades)} total trades cached.')
+        try:
+            database.save_politician_trades(trades)
+        except Exception as e:
+            print(f'[politicians] Failed to persist trades: {e}')
         with _pol_lock:
             _pol_cache['data'] = trades
             _pol_cache['ts']   = time.time()
@@ -618,8 +640,61 @@ def _fetch_pol():
         return _pol_cache['data'] or []
 
 
-# Warm politicians cache on startup and refresh every 12 h
-scheduler.add_job(func=_fetch_pol, trigger='date', id='pol_warmup')
+def _migrate_tracked_json():
+    """One-time: copy the legacy global JSON list into every user's tracked set."""
+    if not os.path.exists(_TRACKED_FILE):
+        return
+    # Skip if anyone is already tracking — prevents re-adding removed politicians
+    # on redeploys where the ephemeral filesystem loses the .migrated rename.
+    try:
+        if database.get_all_tracked_distinct():
+            return
+    except Exception:
+        return
+    try:
+        with open(_TRACKED_FILE) as f:
+            entries = json.load(f)
+    except Exception as e:
+        print(f'[politicians] Could not read legacy tracked file: {e}')
+        return
+
+    users = database.get_all_users()
+    if not users:
+        return  # no users yet — leave the file so migration runs once accounts exist
+
+    for u in users:
+        for e in entries:
+            last  = (e.get('last_name') or '').strip()
+            first = (e.get('first_name') or '').strip()
+            if not last:
+                continue
+            display = e.get('display_name') or (f'{first} {last}'.strip())
+            database.add_tracked_politician(u['id'], first, last, display, _pol_key(first, last))
+
+    try:
+        os.rename(_TRACKED_FILE, _TRACKED_FILE + '.migrated')
+    except Exception:
+        pass
+    print(f'[politicians] Migrated {len(entries)} tracked politician(s) to {len(users)} user(s).')
+
+
+def _preload_politicians():
+    """Warm the in-memory cache from the DB, then refresh from source in the background."""
+    try:
+        cached = database.get_all_politician_trades(2000)
+        if cached:
+            with _pol_lock:
+                _pol_cache['data'] = cached
+                _pol_cache['ts']   = 0   # serve immediately, but force a fresh fetch
+            print(f'[politicians] Warmed cache with {len(cached)} persisted trades.')
+    except Exception as e:
+        print(f'[politicians] Cache warm failed: {e}')
+    _threading.Thread(target=_fetch_pol_background, daemon=True).start()
+
+
+# Migrate legacy data, preload at startup in the background, and refresh every 12 h
+_migrate_tracked_json()
+_preload_politicians()
 scheduler.add_job(func=_fetch_pol, trigger='interval', hours=12, id='pol_refresh')
 
 
@@ -638,31 +713,25 @@ def get_politicians():
 @app.route('/api/politicians/tracked', methods=['GET'])
 @require_auth
 def get_tracked_politicians():
-    with _tracked_lock:
-        return jsonify({'tracked': list(_tracked_pols)})
+    user_id = g.session_user['user_id']
+    return jsonify({'tracked': database.get_tracked_politicians(user_id)})
 
 
 @app.route('/api/politicians/tracked', methods=['POST'])
 @require_auth
 def add_tracked_politician():
+    user_id = g.session_user['user_id']
     body  = request.get_json(force=True, silent=True) or {}
     first = (body.get('first_name') or '').strip()
     last  = (body.get('last_name')  or '').strip()
     if not last:
         return jsonify({'error': 'last_name is required'}), 400
     display = f'{first} {last}'.strip() if first else last
-    entry = {'first_name': first, 'last_name': last, 'display_name': display}
+    key     = _pol_key(first, last)
+    entry   = {'first_name': first, 'last_name': last, 'display_name': display, 'politician_key': key}
 
-    with _tracked_lock:
-        duplicate = any(
-            p['last_name'].lower() == last.lower() and
-            p.get('first_name', '').lower() == first.lower()
-            for p in _tracked_pols
-        )
-        if duplicate:
-            return jsonify({'error': 'Already tracking this politician'}), 409
-        _tracked_pols.append(entry)
-        _save_tracked()
+    if not database.add_tracked_politician(user_id, first, last, display, key):
+        return jsonify({'error': 'Already tracking this politician'}), 409
 
     # Invalidate cache so the next fetch picks up their filings
     with _pol_lock:
@@ -675,22 +744,15 @@ def add_tracked_politician():
 @app.route('/api/politicians/tracked', methods=['DELETE'])
 @require_auth
 def remove_tracked_politician():
+    user_id = g.session_user['user_id']
     body  = request.get_json(force=True, silent=True) or {}
     first = (body.get('first_name') or '').strip()
     last  = (body.get('last_name')  or '').strip()
     if not last:
         return jsonify({'error': 'last_name is required'}), 400
 
-    with _tracked_lock:
-        before = len(_tracked_pols)
-        _tracked_pols[:] = [
-            p for p in _tracked_pols
-            if not (p['last_name'].lower() == last.lower() and
-                    p.get('first_name', '').lower() == first.lower())
-        ]
-        if len(_tracked_pols) == before:
-            return jsonify({'error': 'Not found'}), 404
-        _save_tracked()
+    if not database.remove_tracked_politician(user_id, _pol_key(first, last)):
+        return jsonify({'error': 'Not found'}), 404
 
     return jsonify({'ok': True})
 
